@@ -8,6 +8,7 @@ const { createRateLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 const paymentAttemptLimit = createRateLimiter({
+  prefix: 'chatsphere:rate-limit:payments:',
   windowMs: 60 * 60 * 1000,
   maxRequests: 20,
   message: 'Too many demo payment attempts. Please try again later.',

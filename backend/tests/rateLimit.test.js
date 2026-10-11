@@ -1,54 +1,58 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const express = require('express');
+const request = require('supertest');
 const { createRateLimiter } = require('../middleware/rateLimit');
 const paymentRoutes = require('../routes/paymentRoutes');
 
-function responseRecorder() {
-  return {
-    headers: {},
-    statusCode: 200,
-    body: null,
-    setHeader(name, value) {
-      this.headers[name] = value;
-    },
-    status(code) {
-      this.statusCode = code;
-      return this;
-    },
-    json(body) {
-      this.body = body;
-      return this;
-    },
-  };
+function createLimiterApp(options) {
+  const app = express();
+  app.set('trust proxy', 'loopback');
+  app.use(createRateLimiter(options));
+  app.get('/limited', (_req, res) => res.status(200).json({ ok: true }));
+  return app;
 }
 
-test('rate limiter allows the configured number of requests and rejects the next', () => {
-  const limit = createRateLimiter({ windowMs: 60_000, maxRequests: 1, message: 'Slow down.' });
-  const req = { ip: 'test-client' };
-  const firstResponse = responseRecorder();
-  let nextCalled = false;
+test('rate limiter allows the configured number of requests and rejects the next', async () => {
+  const app = createLimiterApp({ windowMs: 60_000, maxRequests: 1, message: 'Slow down.', redis: null });
+  const firstResponse = await request(app).get('/limited').set('X-Forwarded-For', '192.0.2.1');
+  const secondResponse = await request(app).get('/limited').set('X-Forwarded-For', '192.0.2.1');
 
-  limit(req, firstResponse, () => { nextCalled = true; });
-  assert.equal(nextCalled, true);
-  assert.equal(firstResponse.headers['RateLimit-Remaining'], '0');
-
-  const secondResponse = responseRecorder();
-  limit(req, secondResponse, () => { nextCalled = true; });
-  assert.equal(secondResponse.statusCode, 429);
+  assert.equal(firstResponse.status, 200);
+  assert.equal(firstResponse.headers['ratelimit-remaining'], '0');
+  assert.equal(secondResponse.status, 429);
   assert.equal(secondResponse.body.message, 'Slow down.');
-  assert.ok(Number(secondResponse.headers['Retry-After']) >= 1);
+  assert.ok(Number(secondResponse.headers['retry-after']) >= 1);
 });
 
-test('rate limiter keeps separate client buckets', () => {
-  const limit = createRateLimiter({ windowMs: 60_000, maxRequests: 1, message: 'Slow down.' });
-  const firstResponse = responseRecorder();
-  const secondResponse = responseRecorder();
+test('rate limiter keeps separate client buckets', async () => {
+  const app = createLimiterApp({ windowMs: 60_000, maxRequests: 1, message: 'Slow down.', redis: null });
+  const firstResponse = await request(app).get('/limited').set('X-Forwarded-For', '192.0.2.2');
+  const secondResponse = await request(app).get('/limited').set('X-Forwarded-For', '192.0.2.3');
 
-  limit({ ip: 'client-one' }, firstResponse, () => {});
-  limit({ ip: 'client-two' }, secondResponse, () => {});
+  assert.equal(firstResponse.status, 200);
+  assert.equal(secondResponse.status, 200);
+});
 
-  assert.equal(firstResponse.statusCode, 200);
-  assert.equal(secondResponse.statusCode, 200);
+test('rate limiter uses the in-memory store when Redis is not configured', async () => {
+  const app = createLimiterApp({ windowMs: 60_000, maxRequests: 1, message: 'Slow down.', redis: null });
+  const response = await request(app).get('/limited').set('X-Forwarded-For', '192.0.2.4');
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['ratelimit-remaining'], '0');
+});
+
+test('rate limiter falls back to memory while Redis is not ready', async () => {
+  const app = createLimiterApp({
+    windowMs: 60_000,
+    maxRequests: 1,
+    message: 'Slow down.',
+    redis: { isReady: false },
+  });
+  const response = await request(app).get('/limited').set('X-Forwarded-For', '192.0.2.5');
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['ratelimit-remaining'], '0');
 });
 
 test('demo payment amounts accept valid cents without floating-point rounding errors', () => {

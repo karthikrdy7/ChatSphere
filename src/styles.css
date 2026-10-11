@@ -741,6 +741,21 @@ a {
   overflow: auto;
 }
 
+.older-messages-status {
+  align-self: center;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  padding: 4px 0;
+}
+
+.presence-online {
+  color: var(--success);
+}
+
+.presence-offline {
+  color: var(--text-soft);
+}
+
 .message-skeletons {
   display: grid;
   gap: 14px;

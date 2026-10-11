@@ -76,7 +76,7 @@ router.post('/create', authMiddleware, async (req, res, next) => {
       },
     });
 
-    await group.populate('members', 'name email avatar status');
+    await group.populate('members', 'name email avatar status online lastSeen');
     const io = global.__io;
     if (io) {
       group.members.forEach((member) => io.to(`user:${member._id.toString()}`).emit('conversation-added', { conversation: group }));
@@ -90,7 +90,7 @@ router.post('/create', authMiddleware, async (req, res, next) => {
 router.get('/:groupId', authMiddleware, async (req, res, next) => {
   try {
     const group = await ensureGroupAccess(req.user._id, req.params.groupId);
-    await group.populate('members', 'name email avatar status');
+    await group.populate('members', 'name email avatar status online lastSeen');
     return res.json({ group });
   } catch (error) {
     next(error);
@@ -164,7 +164,7 @@ router.patch('/:groupId/members', authMiddleware, async (req, res, next) => {
     }
 
     await group.save();
-    await group.populate('members', 'name email avatar status');
+    await group.populate('members', 'name email avatar status online lastSeen');
     if (action === 'remove') removeUserSocketsFromGroup(group._id, memberId);
     emitGroupUpdated(group);
     if (action === 'add' && global.__io) global.__io.to(`user:${memberId}`).emit('conversation-added', { conversation: group });
@@ -201,7 +201,7 @@ router.patch('/:groupId/admins', authMiddleware, async (req, res, next) => {
     }
 
     await group.save();
-    await group.populate('members', 'name email avatar status');
+    await group.populate('members', 'name email avatar status online lastSeen');
     emitGroupUpdated(group);
     return res.json({ group });
   } catch (error) {
@@ -228,7 +228,7 @@ router.post('/:groupId/leave', authMiddleware, async (req, res, next) => {
     group.metadata.admins = currentAdmins.filter((adminId) => adminId.toString() !== req.user._id.toString());
     if (isLastAdmin && nextAdmin) group.metadata.admins.push(nextAdmin);
     await group.save();
-    await group.populate('members', 'name email avatar status');
+    await group.populate('members', 'name email avatar status online lastSeen');
     removeUserSocketsFromGroup(group._id, req.user._id);
     emitGroupUpdated(group);
 

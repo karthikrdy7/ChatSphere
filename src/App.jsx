@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Archive,
@@ -74,6 +74,22 @@ const getStoredUser = () => {
 const formatCurrency = (amount) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 
+function formatLastSeen(value) {
+  if (!value) return 'Last seen unavailable';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Last seen unavailable';
+  const elapsed = Date.now() - date.getTime();
+  if (elapsed < 60_000) return 'Last seen just now';
+  if (elapsed < 60 * 60 * 1000) {
+    const minutes = Math.floor(elapsed / 60_000);
+    return `Last seen ${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  }
+  if (date.toDateString() === new Date().toDateString()) {
+    return `Last seen today at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  return `Last seen ${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+}
+
 function getMessageDateInfo(message) {
   const now = new Date();
   let date = message.createdAt ? new Date(message.createdAt) : null;
@@ -140,6 +156,13 @@ function mapMessage(message, userId) {
   };
 }
 
+function compareMessageOrder(left, right) {
+  const leftTime = new Date(left.createdAt || 0).getTime();
+  const rightTime = new Date(right.createdAt || 0).getTime();
+  const timeDifference = leftTime - rightTime;
+  return (Number.isNaN(timeDifference) ? 0 : timeDifference) || String(left.id).localeCompare(String(right.id));
+}
+
 function mapConversation(conversation, userId) {
   const members = conversation.members || [];
   const otherMember = members.find((member) => String(member._id || member) !== String(userId));
@@ -154,7 +177,8 @@ function mapConversation(conversation, userId) {
       ? displayName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase() || 'G'
       : otherMember?.avatar || displayName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase() || 'C',
     accent: conversation.type === 'group' ? 'violet' : 'sky',
-    online: false,
+    online: Boolean(otherMember?.online),
+    lastSeen: otherMember?.lastSeen || null,
     status: conversation.type === 'group' ? `${members.length} members` : otherMember?.status || 'Conversation',
     members,
     admins: conversation.metadata?.admins || [],
@@ -246,7 +270,7 @@ function App() {
   const refreshAccountData = () => {
     if (!localStorage.getItem('chatsphere-user')) return;
     getUsers()
-      .then(({ users }) => setContacts((users || []).map((contact) => ({ ...contact, id: contact._id, online: false }))))
+      .then(({ users }) => setContacts((users || []).map((contact) => ({ ...contact, id: contact._id, online: Boolean(contact.online) }))))
       .catch((error) => {
         setContacts([]);
         setConversationError(`Contacts could not be loaded: ${error.message}`);
@@ -311,6 +335,7 @@ function App() {
           <DashboardPage
             chats={chats}
             setChats={setChats}
+            setContacts={setContacts}
             liveMode={liveMode}
             loading={conversationsLoading}
             error={conversationError}
@@ -330,6 +355,7 @@ function App() {
           <DashboardPage
             chats={chats}
             setChats={setChats}
+            setContacts={setContacts}
             liveMode={liveMode}
             loading={conversationsLoading}
             error={conversationError}
@@ -694,6 +720,7 @@ function ForgotPasswordPage() {
 function DashboardPage({
   chats,
   setChats,
+  setContacts,
   user = currentUser,
   liveMode,
   loading,
@@ -716,10 +743,14 @@ function DashboardPage({
   const [messageSearchResults, setMessageSearchResults] = useState(null);
   const [messageSearchLoading, setMessageSearchLoading] = useState(false);
   const [messagesLoading, setMessagesLoading] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [messagesError, setMessagesError] = useState('');
   const [sending, setSending] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const [socketError, setSocketError] = useState('');
+  const notificationStatusRef = useRef(notificationStatus);
+  notificationStatusRef.current = notificationStatus;
   const [typingUser, setTypingUser] = useState('');
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [editingMessageId, setEditingMessageId] = useState(null);
@@ -728,6 +759,10 @@ function DashboardPage({
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const socketRef = useRef(null);
+  const messageListRef = useRef(null);
+  const olderRequestInFlightRef = useRef(false);
+  const scrollRestoreRef = useRef(null);
+  const initialScrollChatRef = useRef(null);
   const joinedRoomRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const typingSendTimeoutRef = useRef(null);
@@ -778,14 +813,86 @@ function DashboardPage({
         ...chat,
         lastMessage: normalized.text || normalized.attachment?.fileName || 'Attachment',
         lastMessageTime: normalized.time,
-        messages: [...nextMessages, normalized].sort((a, b) => {
-          const at = new Date(a.createdAt || a.time).getTime();
-          const bt = new Date(b.createdAt || b.time).getTime();
-          return at - bt;
-        }),
+        messages: [...nextMessages, normalized].sort(compareMessageOrder),
       };
     }));
   };
+
+  const loadOlderMessages = async () => {
+    if (
+      !liveMode ||
+      !activeChat ||
+      !hasOlderMessages ||
+      olderRequestInFlightRef.current ||
+      messageSearch.trim()
+    ) return;
+    const requestChatId = activeChat.id;
+    const oldestMessage = activeChat.messages[0];
+    if (!oldestMessage?.createdAt) return;
+    const container = messageListRef.current;
+    if (!container) return;
+    const containerTop = container.getBoundingClientRect().top;
+    const anchorElement = [...container.querySelectorAll('[data-message-id]')]
+      .find((element) => element.getBoundingClientRect().bottom > containerTop);
+
+    olderRequestInFlightRef.current = true;
+    scrollRestoreRef.current = {
+      chatId: requestChatId,
+      scrollTop: container.scrollTop,
+      scrollHeight: container.scrollHeight,
+      anchorMessageId: anchorElement?.dataset.messageId,
+      anchorOffset: anchorElement ? anchorElement.getBoundingClientRect().top - containerTop : null,
+    };
+    setLoadingOlderMessages(true);
+    try {
+      const { messages, hasOlder } = await getMessages(requestChatId, {
+        limit: 30,
+        before: oldestMessage.createdAt,
+        beforeId: oldestMessage.id,
+      });
+      if (String(activeChatIdRef.current) !== String(requestChatId)) return;
+      const olderMessages = (messages || []).map((message) => mapMessage(message, user._id || user.id));
+      setChats((previous) => previous.map((chat) => {
+        if (chat.id !== requestChatId) return chat;
+        const combined = new Map([...olderMessages, ...chat.messages].map((message) => [message.id, message]));
+        return {
+          ...chat,
+          messages: [...combined.values()].sort(compareMessageOrder),
+        };
+      }));
+      setHasOlderMessages(Boolean(hasOlder));
+      setLoadingOlderMessages(false);
+    } catch (loadError) {
+      if (String(activeChatIdRef.current) !== String(requestChatId)) return;
+      scrollRestoreRef.current = null;
+      olderRequestInFlightRef.current = false;
+      setLoadingOlderMessages(false);
+      setMessagesError(loadError.message || 'Older messages could not be loaded.');
+    }
+  };
+
+  useLayoutEffect(() => {
+    const container = messageListRef.current;
+    if (!container || messagesLoading) return;
+    if (scrollRestoreRef.current?.chatId === activeChat?.id && !loadingOlderMessages) {
+      const { scrollTop, scrollHeight, anchorMessageId, anchorOffset } = scrollRestoreRef.current;
+      const anchor = [...container.querySelectorAll('[data-message-id]')]
+        .find((element) => element.dataset.messageId === anchorMessageId);
+      if (anchor && anchorOffset !== null) {
+        const updatedOffset = anchor.getBoundingClientRect().top - container.getBoundingClientRect().top;
+        container.scrollTop += updatedOffset - anchorOffset;
+      } else {
+        container.scrollTop = scrollTop + container.scrollHeight - scrollHeight;
+      }
+      scrollRestoreRef.current = null;
+      olderRequestInFlightRef.current = false;
+      return;
+    }
+    if (initialScrollChatRef.current === activeChat?.id) {
+      container.scrollTop = container.scrollHeight;
+      initialScrollChatRef.current = null;
+    }
+  }, [activeChat?.id, activeChat?.messages, displayedMessages, loadingOlderMessages, messagesLoading]);
 
   useEffect(() => {
     if (!liveMode) return undefined;
@@ -803,13 +910,34 @@ function DashboardPage({
       setSocketConnected(false);
       setSocketError(socketConnectError.message || 'Real-time connection unavailable.');
     });
+    socket.on('user-presence', ({ userId, online, lastSeen }) => {
+      const presenceUserId = String(userId);
+      setContacts((previous) => previous.map((contact) =>
+        String(contact._id || contact.id) === presenceUserId
+          ? { ...contact, online: Boolean(online), lastSeen: lastSeen || contact.lastSeen }
+          : contact,
+      ));
+      setChats((previous) => previous.map((chat) => {
+        const members = (chat.members || []).map((member) =>
+          String(member._id || member) === presenceUserId && typeof member === 'object'
+            ? { ...member, online: Boolean(online), lastSeen: lastSeen || member.lastSeen }
+            : member,
+        );
+        const directContact = chat.type === 'direct'
+          ? members.find((member) => String(member._id || member) === presenceUserId)
+          : null;
+        return directContact
+          ? { ...chat, members, online: Boolean(online), lastSeen: lastSeen || chat.lastSeen }
+          : { ...chat, members };
+      }));
+    });
     socket.on('new-message', ({ conversationId, message }) => {
       mergeMessage(String(conversationId), message);
       setTypingUser('');
       if (
         String(conversationId) !== String(activeChatIdRef.current) &&
         String(message.sender?._id) !== String(user._id || user.id) &&
-        notificationStatus === 'Enabled' &&
+        notificationStatusRef.current === 'Enabled' &&
         typeof Notification !== 'undefined' &&
         Notification.permission === 'granted'
       ) {
@@ -837,13 +965,13 @@ function DashboardPage({
           lastMessage: normalized.text || normalized.attachment?.fileName || 'Attachment',
           lastMessageTime: normalized.time,
           unread: !exists && !isOwnMessage && !isActiveConversation ? chat.unread + 1 : chat.unread,
-          messages,
+          messages: messages.sort(compareMessageOrder),
         };
       }));
       if (
         !isOwnMessage &&
         !isActiveConversation &&
-        notificationStatus === 'Enabled' &&
+        notificationStatusRef.current === 'Enabled' &&
         typeof Notification !== 'undefined' &&
         Notification.permission === 'granted'
       ) {
@@ -902,7 +1030,7 @@ function DashboardPage({
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       if (typingSendTimeoutRef.current) clearTimeout(typingSendTimeoutRef.current);
     };
-  }, [liveMode, user._id, user.id, notificationStatus]);
+  }, [liveMode, user._id, user.id, setContacts]);
 
   useEffect(() => {
     const socket = socketRef.current;
@@ -921,12 +1049,18 @@ function DashboardPage({
   useEffect(() => {
     if (!liveMode || !activeChat) return undefined;
     let cancelled = false;
+    setHasOlderMessages(false);
+    setLoadingOlderMessages(false);
+    olderRequestInFlightRef.current = false;
+    scrollRestoreRef.current = null;
+    initialScrollChatRef.current = activeChat.id;
     setMessagesLoading(true);
     setMessagesError('');
-    getMessages(activeChat.id)
-      .then(({ messages }) => {
+    getMessages(activeChat.id, { limit: 30 })
+      .then(({ messages, hasOlder }) => {
         if (cancelled) return;
         const mapped = (messages || []).map((message) => mapMessage(message, user._id || user.id));
+        setHasOlderMessages(Boolean(hasOlder));
         setChats((previous) => previous.map((chat) => chat.id === activeChat.id ? { ...chat, messages: mapped } : chat));
         const unreadIds = mapped.filter((message) => message.sender !== 'me' && message.status !== 'Read').map((message) => message.id);
         if (readReceiptsEnabled) {
@@ -1103,6 +1237,10 @@ function DashboardPage({
 
   const handleAttachment = async (file, messageType) => {
     if (!file || !activeChat) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setMessagesError('File exceeds the 5 MB upload limit.');
+      return;
+    }
     if (!liveMode) {
       setMessagesError('Sign in and connect the backend to send attachments.');
       return;
@@ -1285,7 +1423,17 @@ function DashboardPage({
             <div className={`avatar accent-${activeChat.accent || 'sky'}`}>{activeChat.avatar}</div>
             <div>
               <h3>{activeChat.name}</h3>
-              <small>{typingUser ? `${typingUser} is typing…` : liveMode ? (socketConnected ? activeChat.status : 'Offline · reconnecting…') : activeChat.status}</small>
+              <small>
+                {typingUser
+                  ? `${typingUser} is typing…`
+                  : activeChat.type === 'direct'
+                    ? activeChat.online
+                      ? `Online · ${activeChat.status}`
+                      : formatLastSeen(activeChat.lastSeen)
+                    : liveMode && !socketConnected
+                      ? 'Offline · reconnecting…'
+                      : activeChat.status}
+              </small>
             </div>
           </div>
 
@@ -1330,7 +1478,21 @@ function DashboardPage({
           </label>
         )}
 
-        <div className="message-list" aria-busy={messagesLoading}>
+        <div
+          ref={messageListRef}
+          className="message-list"
+          aria-busy={messagesLoading || loadingOlderMessages}
+          onScroll={(event) => {
+            if (event.currentTarget.scrollTop <= 40) void loadOlderMessages();
+          }}
+          onWheel={(event) => {
+            if (event.deltaY < 0 && event.currentTarget.scrollTop <= 80) void loadOlderMessages();
+          }}
+        >
+          {loadingOlderMessages && <div className="older-messages-status" role="status">Loading older messages…</div>}
+          {!loadingOlderMessages && hasOlderMessages && !messageSearch.trim() && (
+            <div className="older-messages-status">Scroll up to load older messages</div>
+          )}
           {messagesLoading && (
             <div className="message-skeletons" role="status" aria-label="Loading messages">
               <div className="message-skeleton" aria-hidden="true" />
@@ -1353,7 +1515,7 @@ function DashboardPage({
                 {dateInfo.key !== previousDateInfo?.key && (
                   <div className="date-separator"><span>{dateInfo.label}</span></div>
                 )}
-                <div className={`message-row ${isMine ? 'mine' : ''}`}>
+                <div className={`message-row ${isMine ? 'mine' : ''}`} data-message-id={message.id}>
                   <div className="message-bubble">
                     {message.replyTo && (
                       <div className="reply-preview">
@@ -1467,8 +1629,8 @@ function DashboardPage({
             <button type="button" className={`icon-button ${recording ? 'recording' : ''}`} aria-label={recording ? 'Stop voice note' : 'Record voice note'} onClick={toggleRecording}>
               <Mic size={16} />
             </button>
-            <input ref={fileInputRef} hidden type="file" accept=".pdf,.doc,.docx,audio/*" onChange={(event) => { handleAttachment(event.target.files?.[0], event.target.files?.[0]?.type.startsWith('audio/') ? 'voice' : 'document'); event.target.value = ''; }} />
-            <input ref={imageInputRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { handleAttachment(event.target.files?.[0], 'image'); event.target.value = ''; }} />
+            <input ref={fileInputRef} hidden type="file" accept="application/pdf,audio/*" onChange={(event) => { handleAttachment(event.target.files?.[0], event.target.files?.[0]?.type.startsWith('audio/') ? 'voice' : 'document'); event.target.value = ''; }} />
+            <input ref={imageInputRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif,image/bmp,image/tiff" onChange={(event) => { handleAttachment(event.target.files?.[0], 'image'); event.target.value = ''; }} />
 
             <input
               type="text"
@@ -1849,7 +2011,9 @@ function ContactsPage({ contacts, chats, setChats, liveMode }) {
                 <small>{person.status}</small>
               </div>
               <div className="contact-meta">
-                <span>{person.online ? 'Online' : 'Offline'}</span>
+                <span className={person.online ? 'presence-online' : 'presence-offline'}>
+                  {person.online ? 'Online' : formatLastSeen(person.lastSeen)}
+                </span>
                 <button type="button" className="secondary-btn compact" disabled={workingId === (person._id || person.id)} onClick={() => startConversation(person)}>
                   {workingId === (person._id || person.id) ? 'Opening…' : 'Message'}
                 </button>

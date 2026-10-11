@@ -30,7 +30,7 @@ Example registration:
 }
 ```
 
-Names are 2–80 characters, passwords are at least 8 characters and at most 72 UTF-8 bytes for bcrypt, and email addresses are normalized to lowercase. Duplicate email addresses return 409. Password hashes are not included in public user responses. Authentication attempts are limited to 10 per IP per 15 minutes (in-memory, per process).
+Names are 2–80 characters, passwords are at least 8 characters and at most 72 UTF-8 bytes for bcrypt, and email addresses are normalized to lowercase. Duplicate email addresses return 409. Password hashes are not included in public user responses. Login attempts are limited to 5 per IP per 15 minutes; registration attempts are limited to 5 per IP per hour. Limits use Redis when `REDIS_URL` is configured and available, otherwise they fall back to per-process memory with a warning.
 
 ## Conversations and messages
 
@@ -38,7 +38,7 @@ Names are 2–80 characters, passwords are at least 8 characters and at most 72 
 | --- | --- | --- |
 | GET | `/conversations` | List member conversations with unread counts |
 | POST | `/conversations` | Find/create a direct chat using `participantId`; group creation is also supported |
-| GET | `/conversations/:id/messages?limit=50&before=<ISO-date>` | Load up to 100 messages |
+| GET | `/conversations/:id/messages?limit=30&before=<ISO-date>&beforeId=<message-id>` | Load the latest 30 messages or a cursor page of older messages (`hasOlder` indicates more); `beforeId` disambiguates messages with equal timestamps |
 | GET | `/conversations/:id/messages?search=invoice` | Search message text and attachment file names in this conversation |
 | POST | `/conversations/:id/messages` | Send text/sticker, optional `replyTo` and `clientMessageId` |
 | PATCH | `/conversations/:id/messages/:messageId` | Edit own message |
@@ -79,7 +79,7 @@ The group image field is a URL, not an uploaded image workflow. Membership chang
 | POST | `/uploads` | Upload multipart fields `file`, `conversationId`, `messageType` (`image`, `document`, `voice`), optional `replyTo` |
 | GET | `/uploads/:storedName` | Download only when authenticated and still a conversation member |
 
-The server allows JPEG/PNG/WebP, PDF/Word documents, and common audio MIME types, up to 10 MB. Files are stored in `UPLOAD_DIR`, outside MongoDB. MIME allow-list validation is not malware scanning; use private durable object storage and content inspection for production. Uploads are limited to 30 per IP per 15 minutes (in-memory).
+The server allows signature-verified JPEG/PNG/WebP/GIF/AVIF/BMP/TIFF images, PDFs, and supported audio, up to 5 MB. Files receive random stored names and are stored in `UPLOAD_DIR`, outside MongoDB. Format validation is not malware scanning; use private durable object storage and malware scanning for production. Uploads are limited to 30 per IP per 15 minutes.
 
 ## Payments (simulated only)
 
@@ -109,8 +109,8 @@ Server events:
 - `conversation-added`, `conversation-removed`, `group-updated`
 - `typing({ conversationId, isTyping, userId })`
 
-The frontend merges HTTP responses and socket events by database message ID/client ID to avoid showing duplicate sends. Offline socket state is surfaced; HTTP message sending remains available.
+The frontend merges HTTP responses and socket events by database message ID/client ID to avoid showing duplicate sends. Authenticated clients receive `user-presence({ userId, online, lastSeen })` updates for members of shared conversations. The backend marks users online on connect and stores `lastSeen` on their final disconnect. Offline socket state is surfaced; HTTP message sending remains available.
 
 ## Limits and configuration
 
-Set `PORT`, `CLIENT_URL`, `COOKIE_SAME_SITE`, `MONGODB_URI`, `JWT_SECRET` (at least 32 random characters), `JWT_EXPIRES_IN`, `UPLOAD_DIR`, and `NODE_ENV` in `backend/.env`. `CLIENT_URL` is the one allowed frontend origin; `COOKIE_SAME_SITE` defaults to `lax` and can be `none` for cross-site HTTPS deployments. In-memory throttling is not suitable as the only protection for a multi-instance production deployment. Logout clears the browser cookie, but copied stateless JWTs are not revoked before expiry.
+Set `PORT`, `CLIENT_URL`, `COOKIE_SAME_SITE`, `MONGODB_URI`, `JWT_SECRET` (at least 32 random characters), `JWT_EXPIRES_IN`, `UPLOAD_DIR`, and `NODE_ENV` in `backend/.env`. Set optional `REDIS_URL` to use a shared Redis rate-limit store. `CLIENT_URL` is the one allowed frontend origin; `COOKIE_SAME_SITE` defaults to `lax` and can be `none` for cross-site HTTPS deployments. In-memory fallback throttling is per process and is not suitable as the only protection for a multi-instance production deployment. Logout clears the browser cookie, but copied stateless JWTs are not revoked before expiry.

@@ -45,7 +45,7 @@ Small teams and communities often rely on separate tools for conversations, grou
 | Database | MongoDB with Mongoose 8 |
 | Authentication | JSON Web Tokens and bcryptjs |
 | Live events | Socket.IO server/client |
-| Uploads | Multer with a MIME allow-list and 10 MB size cap |
+| Uploads | Multer with signature-verified image/PDF/audio formats and a 5 MB size cap |
 | Tests | Node.js built-in test runner |
 
 ## 5. System design
@@ -79,28 +79,28 @@ Indexes and constraints are detailed in [DATABASE_DESIGN.md](./DATABASE_DESIGN.m
 
 ### Authentication
 
-Registration and login validate request fields, hash/verify passwords using bcrypt, and handle duplicate email conflicts. Successful authentication sets a signed JWT in a Secure, HttpOnly, SameSite cookie and returns only the public profile. The authentication middleware validates the cookie JWT then loads the user; invalid tokens return 401 while database errors flow to the API error handler. Login/register have process-local IP rate limits. Logout clears the cookie; copied JWTs are not revoked server-side.
+Registration and login validate request fields, hash/verify passwords using bcrypt, and handle duplicate email conflicts. Successful authentication sets a signed JWT in a Secure, HttpOnly, SameSite cookie and returns only the public profile. The authentication middleware validates the cookie JWT then loads the user; invalid tokens return 401 while database errors flow to the API error handler. Login is limited to 5 attempts per IP every 15 minutes; registration is limited to 5 attempts per IP every hour. Logout clears the cookie; copied JWTs are not revoked server-side.
 
 ### Conversations, groups, and sockets
 
-The API lists a user's conversations, creates/finds direct conversations, stores message replies/reactions/edits/deletions/read state, and exposes group membership/admin actions. Access is checked against MongoDB participants before protected message and file operations. Socket.IO authenticates with the browser's session cookie, authorizes room entry, relays typing and persisted change events, and supports a disconnected/reconnecting client state. Online/offline presence beyond the current connection indicator is not implemented.
+The API lists a user's conversations, creates/finds direct conversations, stores message replies/reactions/edits/deletions/read state, and exposes group membership/admin actions. Message history loads the newest 30 first and pages older entries by `createdAt` plus message ID; the UI preserves the visible scroll anchor while prepending pages. Access is checked against MongoDB participants before protected message and file operations. Socket.IO authenticates with the browser's session cookie, authorizes room entry, broadcasts online/offline changes to shared contacts, stores `lastSeen` when a user's final socket disconnects, and relays typing and persisted changes.
 
 ### Attachments and payments
 
-Uploads are accepted only for an allow-list of image/document/audio MIME types and below 10 MB. Metadata is stored with a message; bytes remain in a local upload folder. Downloads require current conversation membership. The payment API validates a sender/recipient/amount/note, creates a server-referenced pending demo transaction, and exposes sender-authorized simulated verification. Receipts can be printed or saved as PDF through the browser print dialog. No card/bank secrets are requested; no real transaction occurs.
+Uploads are accepted only when the detected file signature matches an allowed image, PDF, or audio format and the file is no larger than 5 MB. Stored files use random names. Metadata is stored with a message; bytes remain in a local upload folder. Downloads require current conversation membership. The payment API validates a sender/recipient/amount/note, creates a server-referenced pending demo transaction, and exposes sender-authorized simulated verification. Receipts can be printed or saved as PDF through the browser print dialog. No card/bank secrets are requested; no real transaction occurs.
 
 ## 8. Security and reliability
 
-Implemented safeguards include bcrypt hashing, environment-only JWT secrets, non-disclosure of password hashes, HttpOnly cookie authentication for REST and Socket.IO, strict configured CORS, Helmet security headers, request validation for login and registration, membership/admin/ownership checks, escaped search expressions, bounded message/upload sizes, upload MIME allow-list, rate limits, idempotent message persistence, and 503 responses for database-dependent routes when MongoDB is unavailable.
+Implemented safeguards include bcrypt hashing, environment-only JWT secrets, non-disclosure of password hashes, HttpOnly cookie authentication for REST and Socket.IO, strict configured CORS, Helmet security headers, request validation for login and registration, membership/admin/ownership checks, escaped search expressions, bounded message/upload sizes, upload signature checks, UUID-based stored filenames, Redis-backed rate limits with a warning-backed memory fallback, idempotent message persistence, and 503 responses for database-dependent routes when MongoDB is unavailable.
 
-Remaining risks include process-local rate limits, lack of durable private cloud storage and malware scanning, no distributed Socket.IO adapter/presence subsystem, and no server-side JWT revocation. A deployment requires HTTPS, CSP and XSS prevention, durable storage, shared throttling, monitoring, backups, and production configuration. See the [security and deployment notes](../README.md#security-and-deployment-limits).
+Remaining risks include process-local limits when Redis is unavailable, lack of durable private cloud storage and malware scanning, no distributed Socket.IO adapter for multi-instance presence/events, and no server-side JWT revocation. A deployment requires HTTPS, CSP and XSS prevention, durable storage, shared throttling, monitoring, backups, and production configuration. See the [security and deployment notes](../README.md#security-and-deployment-limits).
 
 ## 9. Testing and results
 
 The project's checked-in automated coverage uses Node's built-in test runner. At the time of delivery:
 
 - `npm.cmd run build` (project root): **passed**.
-- `npm.cmd test` (from `backend\`): **20 tests passed**.
+- `npm.cmd test` (from `backend\`): **27 tests passed**.
 - Degraded-mode backend smoke test: `/api/health` reports `degraded`, `/api/health/database` returns 503, and database-dependent API returns 503 with an explicit error.
 - Backend JavaScript `node --check`: **passed**.
 - Workspace diagnostics for the changed frontend files: **no errors reported**.
@@ -117,7 +117,7 @@ The existing branded frontend remains in place and builds for production. Backen
 
 - MongoDB is not configured in the current workspace; live persistence and multi-user authorization have not been verified here.
 - Group image upload, online/offline presence, cross-device preferences/unread notification settings, email recovery, OAuth, and voice/video calls are not complete.
-- Uploads are local-disk and MIME-metadata validated, not content-scanned; production storage is not ready.
+- Uploads are local-disk and format-signature validated, not malware-scanned; production storage is not ready.
 - Payment is a clearly marked simulation, USD-only, and cannot transfer money.
 - Signed-out screens may show local demo data; it is not live server data.
 

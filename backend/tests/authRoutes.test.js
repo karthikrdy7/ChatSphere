@@ -104,3 +104,35 @@ test('registration and login set a secure session cookie and return a public pro
     else process.env.JWT_SECRET = previousSecret;
   }
 });
+
+test('login and registration have separate strict rate limits', async () => {
+  const app = express();
+  app.set('trust proxy', 'loopback');
+  app.use(express.json());
+  app.use('/api/auth', authRoutes);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const registration = await request(app)
+      .post('/api/auth/register')
+      .set('X-Forwarded-For', '198.51.100.10')
+      .send({});
+    const login = await request(app)
+      .post('/api/auth/login')
+      .set('X-Forwarded-For', '198.51.100.11')
+      .send({});
+    assert.equal(registration.status, 400);
+    assert.equal(login.status, 400);
+  }
+
+  const registrationBlocked = await request(app)
+    .post('/api/auth/register')
+    .set('X-Forwarded-For', '198.51.100.10')
+    .send({});
+  const loginBlocked = await request(app)
+    .post('/api/auth/login')
+    .set('X-Forwarded-For', '198.51.100.11')
+    .send({});
+
+  assert.equal(registrationBlocked.status, 429);
+  assert.equal(loginBlocked.status, 429);
+});

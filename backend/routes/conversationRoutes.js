@@ -6,6 +6,7 @@ const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const User = require('../models/User');
 const { authMiddleware } = require('../middleware/auth');
+const { buildCreatedAtCursor } = require('../utils/messageCursor');
 
 const router = express.Router();
 const allowedReactions = new Set(['thumbsUp', 'heart', 'laugh', 'surprise']);
@@ -17,7 +18,7 @@ async function ensureConversationAccess(userId, conversationId) {
     throw error;
   }
 
-  const conversation = await Conversation.findById(conversationId).populate('members', 'name email avatar status');
+  const conversation = await Conversation.findById(conversationId).populate('members', 'name email avatar status online lastSeen');
   if (!conversation) {
     const error = new Error('Conversation not found.');
     error.statusCode = 404;
@@ -47,7 +48,7 @@ function emitConversationEvent(conversation, event, payload) {
 router.get('/', authMiddleware, async (req, res, next) => {
   try {
     const conversations = await Conversation.find({ members: req.user._id })
-      .populate('members', 'name email avatar status')
+      .populate('members', 'name email avatar status online lastSeen')
       .sort({ lastMessageAt: -1, updatedAt: -1 });
     const unreadCounts = await Message.aggregate([
       {
@@ -88,7 +89,7 @@ router.post('/', authMiddleware, async (req, res, next) => {
       let conversation = await Conversation.findOne({
         type: 'individual',
         members: { $all: [req.user._id, participantId], $size: 2 },
-      }).populate('members', 'name email avatar status');
+      }).populate('members', 'name email avatar status online lastSeen');
 
       if (!conversation) {
         conversation = await Conversation.create({
@@ -96,7 +97,7 @@ router.post('/', authMiddleware, async (req, res, next) => {
           members: [req.user._id, participantId],
           name: participant.name,
         });
-        await conversation.populate('members', 'name email avatar status');
+        await conversation.populate('members', 'name email avatar status online lastSeen');
         if (global.__io) global.__io.to(`user:${participantId}`).emit('conversation-added', { conversation });
       }
       return res.status(200).json({ conversation });
@@ -119,7 +120,7 @@ router.post('/', authMiddleware, async (req, res, next) => {
       members: memberIds,
       metadata: { admins: [req.user._id] },
     });
-    await conversation.populate('members', 'name email avatar status');
+    await conversation.populate('members', 'name email avatar status online lastSeen');
     if (global.__io) {
       conversation.members.forEach((member) => global.__io.to(`user:${member._id.toString()}`).emit('conversation-added', { conversation }));
     }
@@ -132,7 +133,8 @@ router.post('/', authMiddleware, async (req, res, next) => {
 router.get('/:conversationId/messages', authMiddleware, async (req, res, next) => {
   try {
     const conversation = await ensureConversationAccess(req.user._id, req.params.conversationId);
-    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const isSearch = req.query.search !== undefined;
+    const limit = Math.min(Math.max(Number(req.query.limit) || (isSearch ? 100 : 30), 1), 100);
     const query = { conversation: conversation._id };
     if (req.query.search !== undefined) {
       if (typeof req.query.search !== 'string' || req.query.search.trim().length > 100) {
@@ -147,18 +149,28 @@ router.get('/:conversationId/messages', authMiddleware, async (req, res, next) =
         ];
       }
     }
-    if (req.query.before && !Number.isNaN(Date.parse(req.query.before))) {
-      query.createdAt = { $lt: new Date(req.query.before) };
+    if (req.query.beforeId && !mongoose.isValidObjectId(req.query.beforeId)) {
+      return res.status(400).json({ message: 'Message cursor identifier is invalid.' });
+    }
+    const { filter: cursorFilter, error: cursorError } = buildCreatedAtCursor(req.query.before, req.query.beforeId);
+    if (cursorError) return res.status(400).json({ message: cursorError });
+    if (cursorFilter && query.$or) {
+      query.$and = [{ $or: query.$or }, cursorFilter];
+      delete query.$or;
+    } else if (cursorFilter) {
+      Object.assign(query, cursorFilter);
     }
 
     const messages = await Message.find(query)
       .populate('sender', 'name avatar')
       .populate({ path: 'replyTo', populate: { path: 'sender', select: 'name avatar' } })
       .populate('readBy', 'name avatar')
-      .sort({ createdAt: -1 })
-      .limit(limit);
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit + 1);
 
-    return res.json({ conversation, messages: messages.reverse() });
+    const hasOlder = messages.length > limit;
+    if (hasOlder) messages.pop();
+    return res.json({ conversation, messages: messages.reverse(), hasOlder });
   } catch (error) {
     next(error);
   }

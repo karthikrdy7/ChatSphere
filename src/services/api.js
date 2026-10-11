@@ -87,8 +87,9 @@ export async function createConversation(data) {
 }
 
 export async function getMessages(conversationId, options = {}) {
-  const query = new URLSearchParams({ limit: String(options.limit || 50) });
+  const query = new URLSearchParams({ limit: String(options.limit || 30) });
   if (options.before) query.set('before', options.before);
+  if (options.beforeId) query.set('beforeId', options.beforeId);
   if (options.search) query.set('search', options.search);
   return request(`/conversations/${conversationId}/messages?${query.toString()}`);
 }

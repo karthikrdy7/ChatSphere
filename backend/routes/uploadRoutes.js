@@ -5,11 +5,18 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const { authMiddleware } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
+const {
+  MAX_UPLOAD_BYTES,
+  createSafeStoredName,
+  getAllowedUploadMimeType,
+  isAllowedDeclaredMimeType,
+} = require('../utils/uploadValidation');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 
 const router = express.Router();
 const uploadAttemptLimit = createRateLimiter({
+  prefix: 'chatsphere:rate-limit:uploads:',
   windowMs: 15 * 60 * 1000,
   maxRequests: 30,
   message: 'Too many file uploads. Please try again later.',
@@ -19,32 +26,15 @@ fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (_req, _file, callback) => callback(null, uploadDir),
-  filename: (_req, file, callback) => {
-    const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
-    callback(null, `${Date.now()}-${require('node:crypto').randomUUID()}-${safeName}`);
-  },
+  filename: (_req, _file, callback) => callback(null, createSafeStoredName()),
 });
 
-const allowedMimeTypes = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'audio/mpeg',
-  'audio/webm',
-  'audio/ogg',
-  'audio/wav',
-  'audio/mp4',
-  'audio/aac',
-]);
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: MAX_UPLOAD_BYTES },
   fileFilter: (_req, file, callback) => {
-    if (allowedMimeTypes.has(file.mimetype)) return callback(null, true);
-    const error = new Error('Unsupported file type. Allowed: images, PDFs, documents, and voice notes.');
+    if (isAllowedDeclaredMimeType(file.mimetype)) return callback(null, true);
+    const error = new Error('Unsupported file type. Allowed: images, PDFs, and audio.');
     error.statusCode = 415;
     return callback(error);
   },
@@ -58,7 +48,7 @@ router.post('/', uploadAttemptLimit, authMiddleware, (req, res, next) => {
   upload.single('file')(req, res, (uploadError) => {
     if (uploadError) {
       if (uploadError instanceof multer.MulterError && uploadError.code === 'LIMIT_FILE_SIZE') {
-        return res.status(413).json({ message: 'File exceeds the 10 MB upload limit.' });
+        return res.status(413).json({ message: 'File exceeds the 5 MB upload limit.' });
       }
       return next(uploadError);
     }
@@ -68,13 +58,18 @@ router.post('/', uploadAttemptLimit, authMiddleware, (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded.' });
     const { conversationId, messageType, replyTo = null } = req.body || {};
-    if (!mongoose.isValidObjectId(conversationId)) {
-      removeUploadedFile(req.file);
-      return res.status(400).json({ message: 'A valid conversation identifier is required.' });
-    }
     if (!['image', 'document', 'voice'].includes(messageType)) {
       removeUploadedFile(req.file);
       return res.status(400).json({ message: 'Unsupported attachment message type.' });
+    }
+    const detectedMimeType = await getAllowedUploadMimeType(req.file.path, messageType);
+    if (!detectedMimeType) {
+      removeUploadedFile(req.file);
+      return res.status(415).json({ message: 'File content must match an allowed image, PDF, or audio attachment.' });
+    }
+    if (!mongoose.isValidObjectId(conversationId)) {
+      removeUploadedFile(req.file);
+      return res.status(400).json({ message: 'A valid conversation identifier is required.' });
     }
     const conversation = await Conversation.findOne({ _id: conversationId, members: req.user._id });
     if (!conversation) {
@@ -89,6 +84,8 @@ router.post('/', uploadAttemptLimit, authMiddleware, (req, res, next) => {
       }
     }
 
+    const originalName = req.file.originalname.split(/[\\/]/).pop();
+    const fileName = originalName.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 255) || 'attachment';
     const message = await Message.create({
       conversation: conversation._id,
       sender: req.user._id,
@@ -97,14 +94,14 @@ router.post('/', uploadAttemptLimit, authMiddleware, (req, res, next) => {
       replyTo,
       readBy: [req.user._id],
       attachment: {
-        fileName: req.file.originalname,
+        fileName,
         storedName: req.file.filename,
-        mimeType: req.file.mimetype,
+        mimeType: detectedMimeType,
         url: `/api/uploads/${encodeURIComponent(req.file.filename)}`,
         size: req.file.size,
       },
     });
-    conversation.lastMessage = req.file.originalname;
+    conversation.lastMessage = fileName;
     conversation.lastMessageAt = message.createdAt;
     await conversation.save();
     const populatedMessage = await Message.findById(message._id)

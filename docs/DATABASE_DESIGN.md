@@ -9,7 +9,7 @@ Mongoose models are defined under `backend/models/`. Configure a MongoDB Atlas o
 - `name`: required, trimmed display name (registration accepts 2–80 characters).
 - `email`: required, normalized lowercase, unique.
 - `passwordHash`: required bcrypt hash; never returned by public profile methods.
-- `avatar`, `status`, `lastSeen`, and created/updated timestamps.
+- `avatar`, profile `status`, socket-derived `online` state, `lastSeen`, and created/updated timestamps.
 
 ### `conversations`
 

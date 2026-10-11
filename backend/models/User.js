@@ -27,6 +27,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: 'Available',
     },
+    online: {
+      type: Boolean,
+      default: false,
+    },
     lastSeen: {
       type: Date,
       default: Date.now,

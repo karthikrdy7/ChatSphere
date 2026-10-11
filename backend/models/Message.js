@@ -44,7 +44,7 @@ const messageSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-messageSchema.index({ conversation: 1, createdAt: -1 });
+messageSchema.index({ conversation: 1, createdAt: -1, _id: -1 });
 messageSchema.index(
   { conversation: 1, sender: 1, clientMessageId: 1 },
   { unique: true, partialFilterExpression: { clientMessageId: { $type: 'string' } } },

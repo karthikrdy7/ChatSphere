@@ -9,6 +9,7 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const { connectDB } = require('./config/db');
+const User = require('./models/User');
 const jwt = require('jsonwebtoken');
 const { getJwtSecret } = require('./utils/security');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
@@ -19,6 +20,11 @@ const paymentRoutes = require('./routes/paymentRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const Conversation = require('./models/Conversation');
 const { readCookie } = require('./utils/authCookie');
+
+function getSafeErrorMessage(error) {
+  return String(error.message || 'Unknown error.')
+    .replace(/mongodb(?:\+srv)?:\/\/[^\s"'<>]+/gi, '[MongoDB connection string redacted]');
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -116,7 +122,57 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   socket.data.conversationRooms = new Set();
-  socket.join(`user:${socket.userId}`);
+  const userRoom = `user:${socket.userId}`;
+  socket.join(userRoom);
+
+  const broadcastPresence = async (online, lastSeen = null) => {
+    const conversations = await Conversation.find({ members: socket.userId }).select('members');
+    const contactIds = new Set();
+    conversations.forEach((conversation) => {
+      conversation.members.forEach((memberId) => {
+        const id = memberId.toString();
+        if (id !== socket.userId.toString()) contactIds.add(id);
+      });
+    });
+    contactIds.forEach((contactId) => {
+      io.to(`user:${contactId}`).emit('user-presence', {
+        userId: socket.userId.toString(),
+        online,
+        lastSeen,
+      });
+    });
+  };
+
+  User.findOneAndUpdate(
+    { _id: socket.userId, online: { $ne: true } },
+    { $set: { online: true } },
+    { new: true },
+  )
+    .select('lastSeen')
+    .then((connectedUser) => {
+      if (connectedUser) return broadcastPresence(true, connectedUser.lastSeen);
+      return undefined;
+    })
+    .catch((error) => {
+      console.error('Unable to update user online status:', getSafeErrorMessage(error));
+    });
+
+  socket.on('disconnect', async () => {
+    try {
+      const remainingSockets = await io.in(userRoom).fetchSockets();
+      if (remainingSockets.length > 0) return;
+
+      const lastSeen = new Date();
+      const disconnectedUser = await User.findByIdAndUpdate(
+        socket.userId,
+        { $set: { online: false, lastSeen } },
+        { new: true },
+      ).select('lastSeen');
+      if (disconnectedUser) await broadcastPresence(false, disconnectedUser.lastSeen);
+    } catch (error) {
+      console.error('Unable to update user offline status:', getSafeErrorMessage(error));
+    }
+  });
 
   socket.on('join-room', async (roomId, acknowledge) => {
     const reply = typeof acknowledge === 'function' ? acknowledge : () => {};
@@ -131,8 +187,7 @@ io.on('connection', (socket) => {
       socket.data.conversationRooms.add(roomId);
       return reply({ ok: true, roomId });
     } catch (error) {
-      const safeMessage = String(error.message || 'Unknown database error.')
-        .replace(/mongodb(?:\+srv)?:\/\/[^\s"'<>]+/gi, '[MongoDB connection string redacted]');
+      const safeMessage = getSafeErrorMessage(error);
       console.error('Socket conversation authorization failed:', safeMessage);
       return reply({ ok: false, message: 'Unable to join this conversation.' });
     }
@@ -166,7 +221,14 @@ function startServer() {
     connectDB().then((dbReady) => {
       if (!dbReady) {
         console.log('MongoDB is not connected. Database-dependent requests will return HTTP 503 until the connection succeeds.');
+        return;
       }
+      return User.updateMany(
+        { online: true },
+        { $set: { online: false, lastSeen: new Date() } },
+      ).catch((error) => {
+        console.error('Unable to clear stale online statuses:', getSafeErrorMessage(error));
+      });
     }).catch((error) => {
       console.error('Unexpected MongoDB startup error:', {
         errorCode: error.code || 'unknown',

@@ -8,10 +8,17 @@ const { authMiddleware } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
-const authAttemptLimit = createRateLimiter({
+const registerAttemptLimit = createRateLimiter({
+  prefix: 'chatsphere:rate-limit:auth-register:',
+  windowMs: 60 * 60 * 1000,
+  maxRequests: 5,
+  message: 'Too many registration attempts. Please try again in an hour.',
+});
+const loginAttemptLimit = createRateLimiter({
+  prefix: 'chatsphere:rate-limit:auth-login:',
   windowMs: 15 * 60 * 1000,
-  maxRequests: 10,
-  message: 'Too many authentication attempts. Please try again later.',
+  maxRequests: 5,
+  message: 'Too many login attempts. Please try again in 15 minutes.',
 });
 
 const validateAuthRequest = (req, res, next) => {
@@ -63,7 +70,7 @@ function setAuthCookie(res, token) {
   return res.cookie(TOKEN_COOKIE_NAME, token, getAuthCookieOptions());
 }
 
-router.post('/register', authAttemptLimit, validateRegister, validateAuthRequest, async (req, res, next) => {
+router.post('/register', registerAttemptLimit, validateRegister, validateAuthRequest, async (req, res, next) => {
   try {
     getJwtSecret();
     const { name, email, password } = req.body || {};
@@ -97,7 +104,7 @@ router.post('/register', authAttemptLimit, validateRegister, validateAuthRequest
   }
 });
 
-router.post('/login', authAttemptLimit, validateLogin, validateAuthRequest, async (req, res, next) => {
+router.post('/login', loginAttemptLimit, validateLogin, validateAuthRequest, async (req, res, next) => {
   try {
     getJwtSecret();
     const { email, password } = req.body || {};
@@ -137,7 +144,7 @@ router.get('/users', authMiddleware, async (req, res, next) => {
         { email: { $regex: escapedSearch, $options: 'i' } },
       ];
     }
-    const users = await User.find(filter).select('name email avatar status').sort({ name: 1 }).limit(100);
+    const users = await User.find(filter).select('name email avatar status online lastSeen').sort({ name: 1 }).limit(100);
     return res.json({ users });
   } catch (error) {
     return next(error);

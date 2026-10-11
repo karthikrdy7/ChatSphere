@@ -127,8 +127,8 @@ The backend tests cover password hashing/validation, token configuration, authen
 - JWTs are issued in Secure, HttpOnly, SameSite cookies and are not readable by frontend JavaScript. The browser includes the cookie in API and Socket.IO requests; use HTTPS in production.
 - Helmet sets security-focused HTTP headers, and CORS permits only the exact origin configured by `CLIENT_URL`.
 - Login and registration validate input types, email format, name length, and password size before processing credentials.
-- In-memory rate limits are process-local and are not shared across multiple backend instances.
-- Local disk uploads need private, durable object storage and malware/content inspection before production. Requests enforce a file-type allow-list and 10 MB cap; do not treat client MIME metadata as a complete malware defense.
+- Set optional `REDIS_URL` to share rate limits across backend instances. If Redis is not configured or becomes unavailable, the server warns and falls back to per-process memory limits.
+- Local disk uploads need private, durable object storage and malware scanning before production. Requests accept signature-verified images, PDFs, and audio up to 5 MB with random stored names; do not treat format validation as malware scanning.
 - Configure HTTPS, strong secrets, exact frontend CORS origin, MongoDB least-privilege access, persistent private upload storage, logs/monitoring, backups, and production-grade rate limiting before deployment.
 - Logout clears the browser's authentication cookie. JWTs are stateless and are not revoked server-side, so copied tokens remain valid until expiry.
 - OAuth, email password reset, calling providers, and real payments are not configured. Demo transaction verification is backend-controlled but simulated and does not prove a real transfer.
