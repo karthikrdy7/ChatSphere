@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Archive,
@@ -73,6 +73,47 @@ const getStoredUser = () => {
 
 const formatCurrency = (amount) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+
+function getMessageDateInfo(message) {
+  const now = new Date();
+  let date = message.createdAt ? new Date(message.createdAt) : null;
+
+  if (!date || Number.isNaN(date.getTime())) {
+    const timeLabel = String(message.time || '');
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    if (/^yesterday\b/i.test(timeLabel)) {
+      date = new Date(today);
+      date.setDate(date.getDate() - 1);
+    } else {
+      const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const weekday = weekdays.findIndex((day) => timeLabel.startsWith(day));
+      if (weekday >= 0) {
+        date = new Date(today);
+        date.setDate(date.getDate() - ((today.getDay() - weekday + 7) % 7 || 7));
+      } else {
+        date = today;
+      }
+    }
+  }
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+  if (dateKey === `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`) {
+    return { key: dateKey, label: 'Today' };
+  }
+  if (dateKey === `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`) {
+    return { key: dateKey, label: 'Yesterday' };
+  }
+
+  return {
+    key: dateKey,
+    label: date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }),
+  };
+}
 
 function mapMessage(message, userId) {
   const sender = message.sender && typeof message.sender === 'object' ? message.sender : null;
@@ -151,7 +192,9 @@ const navItems = [
 function App() {
   const [theme, setTheme] = useState(() => {
     const savedTheme = localStorage.getItem('chatsphere-theme');
-    return savedTheme || 'dark';
+    const initialTheme = savedTheme === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', initialTheme);
+    return initialTheme;
   });
   const [sessionUser, setSessionUser] = useState(getStoredUser);
   const [liveMode, setLiveMode] = useState(() => Boolean(localStorage.getItem('chatsphere-token')));
@@ -259,8 +302,8 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
-      <Route path="/login" element={<AuthPage mode="login" onAuthenticated={handleAuthenticated} />} />
-      <Route path="/register" element={<AuthPage mode="register" onAuthenticated={handleAuthenticated} />} />
+      <Route path="/login" element={<AuthPage mode="login" onAuthenticated={handleAuthenticated} theme={theme} toggleTheme={toggleTheme} />} />
+      <Route path="/register" element={<AuthPage mode="register" onAuthenticated={handleAuthenticated} theme={theme} toggleTheme={toggleTheme} />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route
         path="/dashboard"
@@ -397,7 +440,7 @@ function LandingPage() {
   );
 }
 
-function AuthPage({ mode, onAuthenticated }) {
+function AuthPage({ mode, onAuthenticated, theme, toggleTheme }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [formData, setFormData] = useState({
@@ -477,6 +520,15 @@ function AuthPage({ mode, onAuthenticated }) {
           <Link className="text-link" to="/">
             Back home
           </Link>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={toggleTheme}
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+          >
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
         </div>
 
         <div className="auth-heading">
@@ -1148,14 +1200,14 @@ function DashboardPage({
   }
 
   return (
-    <div className="dashboard-shell">
+    <div className={`dashboard-shell ${detailsOpen ? '' : 'details-collapsed'}`}>
       <aside className="sidebar-shell card-elevated">
         <div className="sidebar-top">
           <Link className="brand" to="/">
             <div className="brand-mark">C</div>
             <span>ChatSphere</span>
           </Link>
-          <button className="icon-button" type="button" onClick={toggleTheme} aria-label="Toggle theme">
+          <button className="icon-button" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>
             {getThemeIcon}
           </button>
         </div>
@@ -1213,7 +1265,11 @@ function DashboardPage({
                   </div>
                   <div className="chat-row muted">
                     <small>{chat.lastMessage}</small>
-                    {chat.unread > 0 && <span className="badge">{chat.unread}</span>}
+                    {chat.unread > 0 && (
+                      <span className="badge unread-badge" aria-label={`${chat.unread} unread messages`}>
+                        {chat.unread > 99 ? '99+' : chat.unread}
+                      </span>
+                    )}
                   </div>
                 </div>
               </button>
@@ -1257,7 +1313,7 @@ function DashboardPage({
             <button type="button" className="icon-button" aria-label="Video call" title="Video calls are not configured" disabled>
               <Video size={16} />
             </button>
-            <button type="button" className="icon-button" aria-label="Toggle conversation details" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
+            <button type="button" className="icon-button details-toggle" aria-label={detailsOpen ? 'Hide conversation details' : 'Show conversation details'} aria-controls="conversation-details" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
               <MoreHorizontal size={16} />
             </button>
           </div>
@@ -1278,80 +1334,93 @@ function DashboardPage({
           </label>
         )}
 
-        <div className="message-list">
-          {messagesLoading && <div className="empty-state">Loading messages…</div>}
+        <div className="message-list" aria-busy={messagesLoading}>
+          {messagesLoading && (
+            <div className="message-skeletons" role="status" aria-label="Loading messages">
+              <div className="message-skeleton" aria-hidden="true" />
+              <div className="message-skeleton mine" aria-hidden="true" />
+              <div className="message-skeleton" aria-hidden="true" />
+            </div>
+          )}
           {messagesError && <div className="error-message" role="alert">{messagesError}</div>}
           {!messagesLoading && !messageSearchLoading && !displayedMessages.length && (
             <div className="empty-state">
-              {messageSearch.trim() ? 'No messages matched your search.' : 'No messages yet. Say hello to start the conversation.'}
+              {messageSearch.trim() ? 'No messages matched your search.' : 'No messages yet, say hi 👋'}
             </div>
           )}
-          {displayedMessages.map((message) => {
+          {displayedMessages.map((message, index) => {
             const isMine = message.sender === 'me' || message.sender === user.name;
+            const dateInfo = getMessageDateInfo(message);
+            const previousDateInfo = index > 0 ? getMessageDateInfo(displayedMessages[index - 1]) : null;
             return (
-              <div key={message.id} className={`message-row ${isMine ? 'mine' : ''}`}>
-                <div className="message-bubble">
-                  {message.replyTo && (
-                    <div className="reply-preview">
-                      <small>{message.replyTo.name}</small>
-                      <span>{message.replyTo.text}</span>
-                    </div>
-                  )}
-                  {editingMessageId === message.id ? (
-                    <div className="edit-message-row">
-                      <input value={editDraft} onChange={(event) => setEditDraft(event.target.value)} aria-label="Edit message" />
-                      <button type="button" className="secondary-btn compact" onClick={() => handleEditMessage(message.id)}>Save</button>
-                      <button type="button" className="icon-button" onClick={() => setEditingMessageId(null)} aria-label="Cancel edit"><X size={14} /></button>
-                    </div>
-                  ) : message.text ? <p className={message.messageType === 'sticker' ? 'sticker-message' : ''}>{message.text}</p> : null}
-                  {message.attachment && (
-                    <button type="button" className="attachment-link" onClick={() => downloadAttachment(message.attachment)}>
-                      <FileText size={16} /> {message.attachment.fileName}
-                    </button>
-                  )}
-                  <div className="message-meta">
-                    <span>{message.time}</span>
-                    {isMine && <span>{message.status}</span>}
-                  </div>
-                  <div className="reaction-row">
-                    {Object.entries(message.reactions || {}).map(([key, value]) => (
-                      <button key={key} type="button" className="reaction-pill" onClick={() => toggleReaction(message.id, key)}>
-                        {key === 'heart' ? '❤' : key === 'thumbsUp' ? '👍' : key === 'laugh' ? '😂' : '😮'} {value}
-                      </button>
-                    ))}
-                    <button type="button" className="reaction-pill icon-only" onClick={() => setReplyingTo({ name: isMine ? user.name : message.sender, text: message.text || message.attachment?.fileName || '', id: message.id })}>
-                      <ReplyIcon />
-                    </button>
-                    <button type="button" className="reaction-pill icon-only" aria-label="Add reaction" onClick={() => setReactionPickerId(reactionPickerId === message.id ? null : message.id)}>
-                      <Smile size={14} />
-                    </button>
-                    {isMine && (
-                      <>
-                        <button type="button" className="reaction-pill icon-only" aria-label="Edit message" onClick={() => { setEditingMessageId(message.id); setEditDraft(message.text); }}>
-                          <Pencil size={13} />
-                        </button>
-                        <button type="button" className="reaction-pill icon-only" aria-label="Delete message" onClick={() => handleDeleteMessage(message.id)}>
-                          <Trash size={13} />
-                        </button>
-                      </>
+              <Fragment key={message.id}>
+                {dateInfo.key !== previousDateInfo?.key && (
+                  <div className="date-separator"><span>{dateInfo.label}</span></div>
+                )}
+                <div className={`message-row ${isMine ? 'mine' : ''}`}>
+                  <div className="message-bubble">
+                    {message.replyTo && (
+                      <div className="reply-preview">
+                        <small>{message.replyTo.name}</small>
+                        <span>{message.replyTo.text}</span>
+                      </div>
                     )}
-                  </div>
-                  {reactionPickerId === message.id && (
-                    <div className="reaction-picker" aria-label="Choose a reaction">
-                      {[
-                        ['thumbsUp', '👍'],
-                        ['heart', '❤️'],
-                        ['laugh', '😂'],
-                        ['surprise', '😮'],
-                      ].map(([reaction, emoji]) => (
-                        <button key={reaction} type="button" className="reaction-pill" onClick={() => { toggleReaction(message.id, reaction); setReactionPickerId(null); }}>
-                          {emoji}
+                    {editingMessageId === message.id ? (
+                      <div className="edit-message-row">
+                        <input value={editDraft} onChange={(event) => setEditDraft(event.target.value)} aria-label="Edit message" />
+                        <button type="button" className="secondary-btn compact" onClick={() => handleEditMessage(message.id)}>Save</button>
+                        <button type="button" className="icon-button" onClick={() => setEditingMessageId(null)} aria-label="Cancel edit"><X size={14} /></button>
+                      </div>
+                    ) : message.text ? <p className={message.messageType === 'sticker' ? 'sticker-message' : ''}>{message.text}</p> : null}
+                    {message.attachment && (
+                      <button type="button" className="attachment-link" onClick={() => downloadAttachment(message.attachment)}>
+                        <FileText size={16} /> {message.attachment.fileName}
+                      </button>
+                    )}
+                    <div className="message-meta">
+                      <span>{message.time}</span>
+                      {isMine && <span>{message.status}</span>}
+                    </div>
+                    <div className="reaction-row">
+                      {Object.entries(message.reactions || {}).filter(([, value]) => Number(value) > 0).map(([key, value]) => (
+                        <button key={key} type="button" className="reaction-pill" onClick={() => toggleReaction(message.id, key)}>
+                          {key === 'heart' ? '❤' : key === 'thumbsUp' ? '👍' : key === 'laugh' ? '😂' : '😮'} {value}
                         </button>
                       ))}
+                      <button type="button" className="reaction-pill icon-only" aria-label="Reply to message" onClick={() => setReplyingTo({ name: isMine ? user.name : message.sender, text: message.text || message.attachment?.fileName || '', id: message.id })}>
+                        <ReplyIcon />
+                      </button>
+                      <button type="button" className="reaction-pill icon-only" aria-label="Add reaction" onClick={() => setReactionPickerId(reactionPickerId === message.id ? null : message.id)}>
+                        <Smile size={14} />
+                      </button>
+                      {isMine && (
+                        <>
+                          <button type="button" className="reaction-pill icon-only" aria-label="Edit message" onClick={() => { setEditingMessageId(message.id); setEditDraft(message.text); }}>
+                            <Pencil size={13} />
+                          </button>
+                          <button type="button" className="reaction-pill icon-only" aria-label="Delete message" onClick={() => handleDeleteMessage(message.id)}>
+                            <Trash size={13} />
+                          </button>
+                        </>
+                      )}
                     </div>
-                  )}
+                    {reactionPickerId === message.id && (
+                      <div className="reaction-picker" aria-label="Choose a reaction">
+                        {[
+                          ['thumbsUp', '👍'],
+                          ['heart', '❤️'],
+                          ['laugh', '😂'],
+                          ['surprise', '😮'],
+                        ].map(([reaction, emoji]) => (
+                          <button key={reaction} type="button" className="reaction-pill" onClick={() => { toggleReaction(message.id, reaction); setReactionPickerId(null); }}>
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              </Fragment>
             );
           })}
           {typingUser && <div className="typing-indicator">{typingUser} is typing…</div>}
@@ -1429,7 +1498,7 @@ function DashboardPage({
         </div>
       </main>
 
-      {detailsOpen && <aside className="details-panel card-elevated">
+      {detailsOpen && <aside id="conversation-details" className="details-panel card-elevated">
         <div className="details-header">
           <h4>Conversation details</h4>
           <button type="button" className="icon-button" aria-label="Open settings" onClick={() => navigate(activeChat.type === 'group' ? `/groups/${activeChat.id}` : '/settings')}>
