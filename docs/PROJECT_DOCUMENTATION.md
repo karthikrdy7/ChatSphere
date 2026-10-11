@@ -64,7 +64,7 @@ Models --> MongoDB[(MongoDB)]
 Express --> Uploads[Local private upload directory]
 ```
 
-The frontend calls REST endpoints through one API service and attaches a bearer token for protected calls. Socket connections carry the JWT in the Socket.IO auth payload. A requested conversation-room join is checked against the conversation's current member list. Message creation is persisted before the server broadcasts events; a client-generated message ID and compound unique index allow duplicate retries to return the existing record instead of storing a second copy.
+The frontend calls REST endpoints through one API service with credentials enabled. The browser sends the HttpOnly session cookie for HTTP and Socket.IO requests; frontend JavaScript does not read the JWT. A requested conversation-room join is checked against the conversation's current member list. Message creation is persisted before the server broadcasts events; a client-generated message ID and compound unique index allow duplicate retries to return the existing record instead of storing a second copy.
 
 ## 6. Data model
 
@@ -79,11 +79,11 @@ Indexes and constraints are detailed in [DATABASE_DESIGN.md](./DATABASE_DESIGN.m
 
 ### Authentication
 
-Registration validates name/email/password, normalizes the email, hashes the password using bcrypt, and handles duplicate email conflicts. Login verifies a password hash and signs a JWT using a configured secret. The authentication middleware validates the JWT then loads the user; invalid tokens return 401 while database errors flow to the API error handler. Login/register have process-local IP rate limits. JWTs are currently stored in browser `localStorage`, and server logout is an acknowledgement rather than token revocation.
+Registration and login validate request fields, hash/verify passwords using bcrypt, and handle duplicate email conflicts. Successful authentication sets a signed JWT in a Secure, HttpOnly, SameSite cookie and returns only the public profile. The authentication middleware validates the cookie JWT then loads the user; invalid tokens return 401 while database errors flow to the API error handler. Login/register have process-local IP rate limits. Logout clears the cookie; copied JWTs are not revoked server-side.
 
 ### Conversations, groups, and sockets
 
-The API lists a user's conversations, creates/finds direct conversations, stores message replies/reactions/edits/deletions/read state, and exposes group membership/admin actions. Access is checked against MongoDB participants before protected message and file operations. Socket.IO requires a token, authorizes room entry, relays typing and persisted change events, and supports a disconnected/reconnecting client state. Online/offline presence beyond the current connection indicator is not implemented.
+The API lists a user's conversations, creates/finds direct conversations, stores message replies/reactions/edits/deletions/read state, and exposes group membership/admin actions. Access is checked against MongoDB participants before protected message and file operations. Socket.IO authenticates with the browser's session cookie, authorizes room entry, relays typing and persisted change events, and supports a disconnected/reconnecting client state. Online/offline presence beyond the current connection indicator is not implemented.
 
 ### Attachments and payments
 
@@ -91,16 +91,16 @@ Uploads are accepted only for an allow-list of image/document/audio MIME types a
 
 ## 8. Security and reliability
 
-Implemented safeguards include bcrypt hashing, environment-only JWT secrets, non-disclosure of password hashes, authenticated REST and Socket.IO, membership/admin/ownership checks, escaped search expressions, bounded message/upload sizes, upload MIME allow-list, rate limits, security response headers, idempotent message persistence, and 503 responses for database-dependent routes when MongoDB is unavailable.
+Implemented safeguards include bcrypt hashing, environment-only JWT secrets, non-disclosure of password hashes, HttpOnly cookie authentication for REST and Socket.IO, strict configured CORS, Helmet security headers, request validation for login and registration, membership/admin/ownership checks, escaped search expressions, bounded message/upload sizes, upload MIME allow-list, rate limits, idempotent message persistence, and 503 responses for database-dependent routes when MongoDB is unavailable.
 
-Remaining risks include localStorage token exposure if XSS is introduced, process-local rate limits, lack of durable private cloud storage and malware scanning, no distributed Socket.IO adapter/presence subsystem, and no server-side JWT revocation. A deployment requires HTTPS, hardened headers/CSP, durable storage, shared throttling, monitoring, backups, and production configuration. See the [security and deployment notes](../README.md#security-and-deployment-limits).
+Remaining risks include process-local rate limits, lack of durable private cloud storage and malware scanning, no distributed Socket.IO adapter/presence subsystem, and no server-side JWT revocation. A deployment requires HTTPS, CSP and XSS prevention, durable storage, shared throttling, monitoring, backups, and production configuration. See the [security and deployment notes](../README.md#security-and-deployment-limits).
 
 ## 9. Testing and results
 
 The project's checked-in automated coverage uses Node's built-in test runner. At the time of delivery:
 
 - `npm.cmd run build` (project root): **passed**.
-- `npm.cmd test` (from `backend\`): **18 tests passed**.
+- `npm.cmd test` (from `backend\`): **20 tests passed**.
 - Degraded-mode backend smoke test: `/api/health` reports `degraded`, `/api/health/database` returns 503, and database-dependent API returns 503 with an explicit error.
 - Backend JavaScript `node --check`: **passed**.
 - Workspace diagnostics for the changed frontend files: **no errors reported**.
@@ -126,7 +126,7 @@ The existing branded frontend remains in place and builds for production. Backen
 1. Add integration tests using an isolated MongoDB test database and two authenticated clients.
 2. Implement online presence with multi-device socket tracking and privacy preferences.
 3. Add secure group image upload and private object storage with content validation/scanning.
-4. Move sessions to appropriately protected HttpOnly cookies and add token revocation/password reset.
+4. Add server-side token revocation and password reset.
 5. Persist cross-device notification/privacy settings and implement reliable notifications.
 6. Integrate a legitimate payment provider only with server-to-server verification and provider-specific compliance.
 7. Add provider-backed OAuth, email delivery, and calling only after configuration and threat review.

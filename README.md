@@ -54,6 +54,7 @@ Edit `backend\.env` locally. Required for authentication and MongoDB-backed API 
 ```dotenv
 PORT=5002
 CLIENT_URL=http://localhost:5174
+COOKIE_SAME_SITE=lax
 MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/chatsphere
 JWT_SECRET=<unique-random-secret-at-least-32-characters>
 JWT_EXPIRES_IN=7d
@@ -61,7 +62,7 @@ UPLOAD_DIR=./uploads
 NODE_ENV=development
 ```
 
-The backend loads `backend\.env` by path regardless of the terminal's current directory; it reads `MONGODB_URI`, not a root Vite variable. The root `.env` is only for frontend build-time settings such as `VITE_API_BASE_URL`.
+The backend loads `backend\.env` by path regardless of the terminal's current directory; it reads `MONGODB_URI`, not a root Vite variable. The root `.env` is only for frontend build-time settings such as `VITE_API_BASE_URL`. Authentication uses an HttpOnly, Secure cookie; the browser sends it with credentialed API and Socket.IO requests, and the token is not stored in localStorage. `COOKIE_SAME_SITE` defaults to `lax`; use `none` only when the frontend and API are on different sites, and serve both over HTTPS.
 
 Generate a local JWT secret with Node.js, then paste it into the ignored `backend\.env` file (never into source control):
 
@@ -123,11 +124,13 @@ The backend tests cover password hashing/validation, token configuration, authen
 
 ## Security and deployment limits
 
-- JWT bearer tokens are stored in browser `localStorage`; an XSS vulnerability could expose them. A production deployment should consider secure, HttpOnly cookie sessions and a comprehensive CSP.
+- JWTs are issued in Secure, HttpOnly, SameSite cookies and are not readable by frontend JavaScript. The browser includes the cookie in API and Socket.IO requests; use HTTPS in production.
+- Helmet sets security-focused HTTP headers, and CORS permits only the exact origin configured by `CLIENT_URL`.
+- Login and registration validate input types, email format, name length, and password size before processing credentials.
 - In-memory rate limits are process-local and are not shared across multiple backend instances.
 - Local disk uploads need private, durable object storage and malware/content inspection before production. Requests enforce a file-type allow-list and 10 MB cap; do not treat client MIME metadata as a complete malware defense.
 - Configure HTTPS, strong secrets, exact frontend CORS origin, MongoDB least-privilege access, persistent private upload storage, logs/monitoring, backups, and production-grade rate limiting before deployment.
-- The logout endpoint acknowledges client-side token removal; JWTs are stateless and are not revoked server-side.
+- Logout clears the browser's authentication cookie. JWTs are stateless and are not revoked server-side, so copied tokens remain valid until expiry.
 - OAuth, email password reset, calling providers, and real payments are not configured. Demo transaction verification is backend-controlled but simulated and does not prove a real transfer.
 
 ### Deploy frontend and backend separately

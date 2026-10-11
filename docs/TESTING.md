@@ -20,9 +20,9 @@ The degraded-mode backend was also started without a MongoDB URI: `/api/health` 
 
 ## Local live-database smoke test
 
-1. Configure `backend\.env` as described in [README](../README.md), with a local or Atlas `MONGODB_URI`, random `JWT_SECRET`, and `CLIENT_URL=http://localhost:5173`.
+1. Configure `backend\.env` as described in [README](../README.md), with a local or Atlas `MONGODB_URI`, random `JWT_SECRET`, `CLIENT_URL` set to the exact frontend URL, and `COOKIE_SAME_SITE=lax`.
 2. Start backend and frontend in separate PowerShell terminals; verify `/api/health/database` reports `connected`.
-3. Register two different accounts in separate browser profiles. Confirm duplicate email rejection and that profile responses contain no password hashes.
+3. Register two different accounts in separate browser profiles. Confirm the browser receives an HttpOnly, Secure, SameSite cookie, duplicate email rejection, and that profile responses contain no password hashes.
 4. Start a direct chat from Contacts. Send, reply to, edit, delete, and react to messages; search message text and verify history after reload.
 5. Open the same conversation in both profiles. Verify Socket.IO sends, typing, and read receipts; disconnect one client and confirm the UI displays reconnecting state.
 6. Create a group, manage members/admins, leave, and verify a removed member cannot read messages or download files.
@@ -47,4 +47,4 @@ Items in steps 2–8 are **not verified against a live database in this workspac
 - MongoDB Atlas credentials are not provided, so database persistence, multi-user chat, live Socket.IO delivery, group permissions, attachments, and payments have not been end-to-end verified.
 - OAuth, email reset delivery, calling, and real-money provider verification need external services.
 - `npm audit` previously identified advisories in the existing React Router dependency tree; review the current audit before deployment and assess any major-version migration separately.
-- In-memory rate limiting, browser `localStorage` JWT storage, local-disk uploads, and absent malware inspection are not production security controls on their own.
+- In-memory rate limiting, local-disk uploads, and absent malware inspection are not production security controls on their own. Authentication tokens are stored in Secure, HttpOnly, SameSite cookies rather than browser-readable storage.

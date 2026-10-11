@@ -1,10 +1,10 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { getJwtSecret } = require('../utils/security');
+const { TOKEN_COOKIE_NAME } = require('../utils/authCookie');
 
 async function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  const token = req.cookies?.[TOKEN_COOKIE_NAME];
 
   if (!token) {
     return res.status(401).json({ message: 'Authentication required.' });

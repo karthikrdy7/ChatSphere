@@ -196,9 +196,12 @@ function App() {
     document.documentElement.setAttribute('data-theme', initialTheme);
     return initialTheme;
   });
-  const [sessionUser, setSessionUser] = useState(getStoredUser);
-  const [liveMode, setLiveMode] = useState(() => Boolean(localStorage.getItem('chatsphere-token')));
-  const [chats, setChats] = useState(() => localStorage.getItem('chatsphere-token') ? [] : initialChats);
+  const [sessionUser, setSessionUser] = useState(() => {
+    localStorage.removeItem('chatsphere-token');
+    return getStoredUser();
+  });
+  const [liveMode, setLiveMode] = useState(() => Boolean(localStorage.getItem('chatsphere-user')));
+  const [chats, setChats] = useState(() => localStorage.getItem('chatsphere-user') ? [] : initialChats);
   const [contacts, setContacts] = useState(initialContacts);
   const [transactions, setTransactions] = useState(initialTransactions);
   const [notificationStatus, setNotificationStatus] = useState(() => {
@@ -206,7 +209,7 @@ function App() {
     return Notification.permission === 'granted' ? 'Enabled' : Notification.permission === 'denied' ? 'Blocked' : 'Not enabled';
   });
   const [readReceiptsEnabled, setReadReceiptsEnabled] = useState(() => localStorage.getItem('chatsphere-read-receipts') !== 'false');
-  const [conversationsLoading, setConversationsLoading] = useState(Boolean(localStorage.getItem('chatsphere-token')));
+  const [conversationsLoading, setConversationsLoading] = useState(Boolean(localStorage.getItem('chatsphere-user')));
   const [conversationError, setConversationError] = useState('');
 
   useEffect(() => {
@@ -215,8 +218,7 @@ function App() {
   }, [theme]);
 
   const refreshConversations = async () => {
-    const token = localStorage.getItem('chatsphere-token');
-    if (!token) {
+    if (!localStorage.getItem('chatsphere-user')) {
       setLiveMode(false);
       setChats(initialChats);
       setConversationsLoading(false);
@@ -242,7 +244,7 @@ function App() {
   };
 
   const refreshAccountData = () => {
-    if (!localStorage.getItem('chatsphere-token')) return;
+    if (!localStorage.getItem('chatsphere-user')) return;
     getUsers()
       .then(({ users }) => setContacts((users || []).map((contact) => ({ ...contact, id: contact._id, online: false }))))
       .catch((error) => {
@@ -255,8 +257,7 @@ function App() {
   };
 
   useEffect(() => {
-    const token = localStorage.getItem('chatsphere-token');
-    if (!token) return;
+    if (!localStorage.getItem('chatsphere-user')) return;
 
     fetchProfile()
       .then(({ user }) => {
@@ -264,7 +265,6 @@ function App() {
         localStorage.setItem('chatsphere-user', JSON.stringify(user));
       })
       .catch((error) => {
-        localStorage.removeItem('chatsphere-token');
         localStorage.removeItem('chatsphere-user');
         setSessionUser(currentUser);
         setLiveMode(false);
@@ -494,10 +494,9 @@ function AuthPage({ mode, onAuthenticated, theme, toggleTheme }) {
             password: formData.password,
           });
 
-      if (!payload?.token || !payload?.user) {
+      if (!payload?.user) {
         throw new Error('The backend returned an incomplete authentication response.');
       }
-      localStorage.setItem('chatsphere-token', payload.token);
       localStorage.setItem('chatsphere-user', JSON.stringify(payload.user));
       await onAuthenticated(payload.user);
 
@@ -790,10 +789,7 @@ function DashboardPage({
 
   useEffect(() => {
     if (!liveMode) return undefined;
-    const token = localStorage.getItem('chatsphere-token');
-    if (!token) return undefined;
-
-    const socket = io(socketBaseUrl, { auth: { token }, reconnection: true });
+    const socket = io(socketBaseUrl, { withCredentials: true, reconnection: true });
     socketRef.current = socket;
     socket.on('connect', () => {
       setSocketConnected(true);
@@ -1163,7 +1159,7 @@ function DashboardPage({
         throw new Error('Attachment URL is invalid.');
       }
       const response = await fetch(downloadUrl, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('chatsphere-token')}` },
+        credentials: 'include',
       });
       if (!response.ok) throw new Error('Attachment download failed.');
       const blobUrl = URL.createObjectURL(await response.blob());
@@ -2172,7 +2168,7 @@ function ProfilePage({ user, setUser, onLogout }) {
     setError('');
     setSaved(false);
     try {
-      const updatedUser = localStorage.getItem('chatsphere-token')
+      const updatedUser = localStorage.getItem('chatsphere-user')
         ? (await updateProfile({ name: name.trim(), status: status.trim() })).user
         : { ...user, name: name.trim(), status: status.trim() };
       setUser(updatedUser);
@@ -2189,11 +2185,10 @@ function ProfilePage({ user, setUser, onLogout }) {
     setLoggingOut(true);
     setError('');
     try {
-      if (localStorage.getItem('chatsphere-token')) await logoutUser();
+      if (localStorage.getItem('chatsphere-user')) await logoutUser();
     } catch (logoutError) {
       setError(`Signed out locally; server logout did not complete: ${logoutError.message}`);
     } finally {
-      localStorage.removeItem('chatsphere-token');
       localStorage.removeItem('chatsphere-user');
       onLogout();
       navigate('/login');

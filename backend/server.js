@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 const dotenv = require('dotenv');
 const http = require('http');
 const path = require('node:path');
@@ -16,10 +18,12 @@ const groupRoutes = require('./routes/groupRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const Conversation = require('./models/Conversation');
+const { readCookie } = require('./utils/authCookie');
 
 const app = express();
 const server = http.createServer(app);
 const port = Number(process.env.PORT || 5002);
+const frontendUrl = process.env.CLIENT_URL || 'http://localhost:5173';
 app.disable('x-powered-by');
 
 server.on('error', (error) => {
@@ -36,23 +40,27 @@ server.on('error', (error) => {
 
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    origin: frontendUrl,
     credentials: true,
   },
 });
 global.__io = io;
 
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin || origin === frontendUrl) return callback(null, true);
+    return callback(new Error('Origin is not allowed by CORS.'));
+  },
+  credentials: true,
+};
+
+app.use(helmet());
 app.use(
-  cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
-    credentials: true,
-  }),
+  cors(corsOptions),
 );
+app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
   next();
 });
@@ -91,8 +99,7 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 io.use((socket, next) => {
-  const authHeader = socket.handshake.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : socket.handshake.auth?.token || null;
+  const token = readCookie(socket.handshake.headers.cookie);
 
   if (!token) {
     return next(new Error('Authentication required for Socket.IO connections.'));

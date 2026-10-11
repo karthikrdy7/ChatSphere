@@ -1,7 +1,9 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
-const { validateEmail, hashPassword, getJwtSecret, generateToken } = require('../utils/security');
+const { hashPassword, getJwtSecret, generateToken } = require('../utils/security');
+const { TOKEN_COOKIE_NAME, getAuthCookieOptions } = require('../utils/authCookie');
 const { authMiddleware } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
 
@@ -12,29 +14,62 @@ const authAttemptLimit = createRateLimiter({
   message: 'Too many authentication attempts. Please try again later.',
 });
 
-router.post('/register', authAttemptLimit, async (req, res, next) => {
+const validateAuthRequest = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ message: errors.array()[0].msg });
+  }
+  return next();
+};
+
+const validateRegister = [
+  body('name')
+    .isString().withMessage('Name must be between 2 and 80 characters.')
+    .bail()
+    .trim()
+    .isLength({ min: 2, max: 80 }).withMessage('Name must be between 2 and 80 characters.'),
+  body('email')
+    .isString().withMessage('Please provide a valid email address.')
+    .bail()
+    .trim()
+    .isEmail().withMessage('Please provide a valid email address.')
+    .customSanitizer((email) => email.toLowerCase()),
+  body('password')
+    .isString().withMessage('Password must be at least 8 characters and no more than 72 bytes.')
+    .bail()
+    .isLength({ min: 8 }).withMessage('Password must be at least 8 characters and no more than 72 bytes.')
+    .bail()
+    .custom((password) => Buffer.byteLength(password, 'utf8') <= 72)
+    .withMessage('Password must be at least 8 characters and no more than 72 bytes.'),
+];
+
+const validateLogin = [
+  body('email')
+    .isString().withMessage('Email and password are required.')
+    .bail()
+    .trim()
+    .isEmail().withMessage('Please provide a valid email address.')
+    .customSanitizer((email) => email.toLowerCase()),
+  body('password')
+    .isString().withMessage('Email and password are required.')
+    .bail()
+    .notEmpty().withMessage('Email and password are required.')
+    .bail()
+    .custom((password) => Buffer.byteLength(password, 'utf8') <= 72)
+    .withMessage('Password is too long.'),
+];
+
+function setAuthCookie(res, token) {
+  return res.cookie(TOKEN_COOKIE_NAME, token, getAuthCookieOptions());
+}
+
+router.post('/register', authAttemptLimit, validateRegister, validateAuthRequest, async (req, res, next) => {
   try {
     getJwtSecret();
     const { name, email, password } = req.body || {};
-
-    if (typeof name !== 'string' || typeof email !== 'string' || typeof password !== 'string') {
-      return res.status(400).json({ message: 'Name, email, and password are required.' });
-    }
-
     const normalizedName = name.trim();
-    const normalizedEmail = email.trim().toLowerCase();
-    if (normalizedName.length < 2 || normalizedName.length > 80) {
-      return res.status(400).json({ message: 'Name must be between 2 and 80 characters.' });
-    }
-    if (!validateEmail(normalizedEmail)) {
-      return res.status(400).json({ message: 'Please provide a valid email address.' });
-    }
 
-    if (password.length < 8 || Buffer.byteLength(password, 'utf8') > 72) {
-      return res.status(400).json({ message: 'Password must be at least 8 characters and no more than 72 bytes.' });
-    }
-
-    const existingUser = await User.findOne({ email: normalizedEmail });
+    const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(409).json({ message: 'An account with this email already exists.' });
     }
@@ -42,16 +77,16 @@ router.post('/register', authAttemptLimit, async (req, res, next) => {
     const passwordHash = await hashPassword(password);
     const user = await User.create({
       name: normalizedName,
-      email: normalizedEmail,
+      email,
       passwordHash,
       avatar: normalizedName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase() || 'CU',
       status: 'Available',
     });
 
     const token = generateToken(user._id);
+    setAuthCookie(res, token);
 
     return res.status(201).json({
-      token,
       user: user.toPublicJSON(),
     });
   } catch (error) {
@@ -62,16 +97,11 @@ router.post('/register', authAttemptLimit, async (req, res, next) => {
   }
 });
 
-router.post('/login', authAttemptLimit, async (req, res, next) => {
+router.post('/login', authAttemptLimit, validateLogin, validateAuthRequest, async (req, res, next) => {
   try {
     getJwtSecret();
     const { email, password } = req.body || {};
-
-    if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
-      return res.status(400).json({ message: 'Email and password are required.' });
-    }
-
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
@@ -82,9 +112,9 @@ router.post('/login', authAttemptLimit, async (req, res, next) => {
     }
 
     const token = generateToken(user._id);
+    setAuthCookie(res, token);
 
     return res.status(200).json({
-      token,
       user: user.toPublicJSON(),
     });
   } catch (error) {
@@ -149,7 +179,8 @@ router.put('/profile', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.post('/logout', authMiddleware, (req, res) => {
+router.post('/logout', (req, res) => {
+  res.clearCookie(TOKEN_COOKIE_NAME, getAuthCookieOptions());
   return res.status(200).json({ message: 'Logged out successfully.' });
 });
 

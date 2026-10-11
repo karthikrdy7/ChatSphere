@@ -6,7 +6,7 @@ const request = require('supertest');
 const User = require('../models/User');
 const authRoutes = require('../routes/authRoutes');
 
-test('registration and login return a public profile and valid token using the auth routes', async () => {
+test('registration and login set a secure session cookie and return a public profile', async () => {
   const previousSecret = process.env.JWT_SECRET;
   const originalFindOne = User.findOne;
   const originalCreate = User.create;
@@ -50,7 +50,11 @@ test('registration and login return a public profile and valid token using the a
     assert.equal(registration.body.user.email, 'test-user@example.invalid');
     assert.equal(registration.body.user.passwordHash, undefined);
     assert.equal(await bcrypt.compare('StrongPass123!', createdPasswordHash), true);
-    assert.ok(registration.body.token);
+    assert.equal(registration.body.token, undefined);
+    assert.match(registration.headers['set-cookie'][0], /chatsphere_session=/);
+    assert.match(registration.headers['set-cookie'][0], /HttpOnly/);
+    assert.match(registration.headers['set-cookie'][0], /Secure/);
+    assert.match(registration.headers['set-cookie'][0], /SameSite=Lax/);
 
     const duplicate = await request(app)
       .post('/api/auth/register')
@@ -67,6 +71,16 @@ test('registration and login return a public profile and valid token using the a
       .send({ name: 'Test User', email: 'invalid', password: 'StrongPass123!' });
     assert.equal(invalidEmail.status, 400);
 
+    const invalidPassword = await request(app)
+      .post('/api/auth/register')
+      .send({ name: 'Test User', email: 'new-user@example.invalid', password: 'short' });
+    assert.equal(invalidPassword.status, 400);
+
+    const invalidLoginEmail = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'invalid', password: 'StrongPass123!' });
+    assert.equal(invalidLoginEmail.status, 400);
+
     const invalidLogin = await request(app)
       .post('/api/auth/login')
       .send({ email: 'test-user@example.invalid', password: 'wrong-password' });
@@ -77,7 +91,12 @@ test('registration and login return a public profile and valid token using the a
       .send({ email: ' TEST-USER@example.invalid ', password: 'StrongPass123!' });
     assert.equal(login.status, 200);
     assert.equal(login.body.user.passwordHash, undefined);
-    assert.ok(login.body.token);
+    assert.equal(login.body.token, undefined);
+    assert.match(login.headers['set-cookie'][0], /chatsphere_session=/);
+
+    const logout = await request(app).post('/api/auth/logout');
+    assert.equal(logout.status, 200);
+    assert.match(logout.headers['set-cookie'][0], /chatsphere_session=;/);
   } finally {
     User.findOne = originalFindOne;
     User.create = originalCreate;

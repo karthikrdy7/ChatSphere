@@ -1,6 +1,6 @@
 # ChatSphere API and real-time events
 
-Default base URL: `http://localhost:5002/api`. JSON responses use the top-level `message` property for errors. Protected HTTP routes require `Authorization: Bearer <JWT>`. The health routes and register/login do not require a token. Database-dependent routes return 503 when MongoDB is unavailable.
+Default base URL: `http://localhost:5002/api`. JSON responses use the top-level `message` property for errors. Protected HTTP routes use the `chatsphere_session` HttpOnly cookie set by login/register; browser clients must send requests with credentials enabled. The health routes and register/login do not require an existing session. Database-dependent routes return 503 when MongoDB is unavailable.
 
 ## Health
 
@@ -13,12 +13,12 @@ Default base URL: `http://localhost:5002/api`. JSON responses use the top-level 
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| POST | `/auth/register` | Create account; returns JWT and public user |
-| POST | `/auth/login` | Authenticate; returns JWT and public user |
+| POST | `/auth/register` | Create account; sets the session cookie and returns the public user |
+| POST | `/auth/login` | Authenticate; sets the session cookie and returns the public user |
 | GET | `/auth/me` | Read current public user |
 | GET | `/auth/users?search=alex` | Search up to 100 other registered users |
 | PUT | `/auth/profile` | Update `name`, `status`, or `avatar` |
-| POST | `/auth/logout` | Authenticated acknowledgement; client deletes its JWT |
+| POST | `/auth/logout` | Clear the session cookie |
 
 Example registration:
 
@@ -94,7 +94,7 @@ Only USD is currently accepted; amount must be positive, at most 1,000,000, and 
 
 ## Socket.IO
 
-Connect to `http://localhost:5002` with Socket.IO auth `{ auth: { token: "<JWT>" } }`. The server verifies the token. `join-room(conversationId, ack)` checks MongoDB membership before joining; acknowledgement is `{ ok: true, roomId }` or `{ ok: false, message }`.
+Connect to `http://localhost:5002` with Socket.IO `withCredentials: true`. The browser sends the same `chatsphere_session` cookie used by protected HTTP routes. `join-room(conversationId, ack)` checks MongoDB membership before joining; acknowledgement is `{ ok: true, roomId }` or `{ ok: false, message }`.
 
 Client events:
 
@@ -113,4 +113,4 @@ The frontend merges HTTP responses and socket events by database message ID/clie
 
 ## Limits and configuration
 
-Set `PORT`, `CLIENT_URL`, `MONGODB_URI`, `JWT_SECRET` (at least 32 random characters), `JWT_EXPIRES_IN`, `UPLOAD_DIR`, and `NODE_ENV` in `backend/.env`. The repository has placeholders only. In-memory throttling is not suitable as the only protection for a multi-instance production deployment. JWT logout removes the browser token but does not revoke a stateless JWT server-side.
+Set `PORT`, `CLIENT_URL`, `COOKIE_SAME_SITE`, `MONGODB_URI`, `JWT_SECRET` (at least 32 random characters), `JWT_EXPIRES_IN`, `UPLOAD_DIR`, and `NODE_ENV` in `backend/.env`. `CLIENT_URL` is the one allowed frontend origin; `COOKIE_SAME_SITE` defaults to `lax` and can be `none` for cross-site HTTPS deployments. In-memory throttling is not suitable as the only protection for a multi-instance production deployment. Logout clears the browser cookie, but copied stateless JWTs are not revoked before expiry.

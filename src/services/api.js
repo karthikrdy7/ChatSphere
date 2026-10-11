@@ -6,16 +6,12 @@ async function request(path, options = {}) {
     headers['Content-Type'] = 'application/json';
   }
 
-  const token = localStorage.getItem('chatsphere-token');
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
   let response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
       headers,
+      credentials: 'include',
     });
   } catch (error) {
     if (error.name === 'AbortError') throw error;
