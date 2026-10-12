@@ -74,23 +74,6 @@ Chat Interface
 
 ⸻
 
-🏗️ System Architecture
-
-flowchart TD
-    A["User 1<br/>React + Vite"]
-    B["User 2<br/>React + Vite"]
-    C["Express Backend<br/>REST API"]
-    D["Socket.IO Server<br/>Real-Time Events"]
-    E[("MongoDB<br/>Mongoose")]
-    F["File Upload Storage"]
-    A -->|"HTTP Requests"| C
-    B -->|"HTTP Requests"| C
-    A <-->|"WebSocket Events"| D
-    B <-->|"WebSocket Events"| D
-    C --> E
-    D --> E
-    C --> F
-
 How It Works
 
 1. Users register or log in to access the application.
@@ -100,8 +83,6 @@ How It Works
 5. Messages are stored in MongoDB for persistence.
 6. Socket.IO delivers new messages and conversation events to authorized recipients.
 7. Uploaded files are handled by the backend and stored according to the configured storage system.
-
-Note: The diagram represents the intended architecture. Actual event handling, authorization, message persistence, and upload behavior depend on the implementation in the repository.
 
 ⸻
 
