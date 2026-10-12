@@ -12,13 +12,14 @@ Designed to deliver a smooth, responsive, and interactive chatting experience wi
 
 Showcase the application’s user interface and key features.
 
-Landing Page	Login Page
+Landing Page	
 	<img width="1453" height="830" alt="image" src="https://github.com/user-attachments/assets/6bf90090-8a84-45b1-842d-f0b935ac82c2" />
 
-Dashboard	Chat Interface
-	
+Login Page
+<img width="1443" height="821" alt="image" src="https://github.com/user-attachments/assets/b02b9b1d-433f-4894-ae23-c3817e621dd0" />
 
-Add screenshots to docs/screenshots/ using the filenames shown above.
+Chat Interface
+<img width="1467" height="846" alt="Screenshot 2026-10-12 at 10 35 02 AM" src="https://github.com/user-attachments/assets/649fd706-2674-41a8-886e-861f4711f796" />
 
 ⸻
 
