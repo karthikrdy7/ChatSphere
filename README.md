@@ -1,473 +1,152 @@
-💬 ChatSphere — Real-Time Chat Application
+# ChatSphere
 
-A full-stack, real-time messaging application built with React, Node.js, Express, MongoDB, and Socket.IO. ChatSphere provides a modern communication experience with direct messaging, group conversations, message reactions, voice notes, file sharing, and a clean dark-themed interface.
+ChatSphere is a responsive React chat interface backed by an Express API, MongoDB/Mongoose, and authenticated Socket.IO. It includes account registration and profiles, direct and group conversations, persistent messages, file/voice-note uploads, and a server-recorded **simulated-only** payment/receipt flow.
 
-Designed to deliver a smooth, responsive, and interactive chatting experience with real-time communication and user authentication.
+The existing branded frontend is preserved. When signed out, it can show the original local demo conversations and payment examples; these are interface samples only and are not database records or live accounts.
 
-🌐 Live Demo: Add your deployed application URL here.
+## Features and current verification
 
-⸻
+- Authentication: bcrypt password hashing, JWT sessions, profile API, duplicate-email handling, protected endpoints, and rate-limited login/registration.
+- Direct and group chat: MongoDB-backed conversation history, idempotent message sends, replies, reactions, sender-only edit/delete, unread counts, read receipts, typing, and authenticated Socket.IO events.
+- Group administration: create groups, add/remove/promote/demote members, leave groups, and enforce membership/admin checks.
+- Chat controls: search conversations and messages, emoji/sticker picker, voice recording, validated attachment upload/download, notifications, and saved light/dark theme.
+- Demo payments: server-created transaction references, simulated verification, history, and printable receipts. **No money moves and no banking/card credentials are collected.**
+- Verification run: `npm.cmd run build` succeeds; backend `npm.cmd test` succeeds (18 tests). Degraded-mode health reports MongoDB unavailable and database-dependent routes return 503. Live database and multi-account behavior remain unverified until configured.
 
-📸 Screenshots
+Some features are intentionally partial or blocked: online presence, group image upload, cross-device notification/privacy preferences, email recovery, OAuth, voice/video calls, durable cloud file storage, and real payment-provider processing. See [the feature checklist](./BACKEND_IMPLEMENTATION_CHECKLIST.md) for exact status.
 
-Showcase the application’s user interface and key features.
+## Technology and architecture
 
-Landing Page	
-	<img width="1453" height="830" alt="image" src="https://github.com/user-attachments/assets/6bf90090-8a84-45b1-842d-f0b935ac82c2" />
+- Frontend: React 18, React Router, Vite, CSS custom properties, `lucide-react`, and `socket.io-client`.
+- Backend: Node.js, Express 4, Mongoose 8, MongoDB, JWT, bcryptjs, Multer, and Socket.IO 4.
+- Persistence: users, conversations, messages, and transactions use Mongoose models. Attachment bytes are stored on local disk in development; message metadata is stored in MongoDB.
+- API base URL: `VITE_API_BASE_URL` (local default `/api`, proxied by Vite to `http://localhost:5002`).
 
-Login Page
-<img width="1443" height="821" alt="image" src="https://github.com/user-attachments/assets/b02b9b1d-433f-4894-ae23-c3817e621dd0" />
+See [system architecture](./docs/SYSTEM_ARCHITECTURE.md), [database design](./docs/DATABASE_DESIGN.md), and [API documentation](./docs/API_DOCUMENTATION.md).
 
-Chat Interface
-<img width="1467" height="846" alt="Screenshot 2026-10-12 at 10 35 02 AM" src="https://github.com/user-attachments/assets/649fd706-2674-41a8-886e-861f4711f796" />
+## Folder structure
 
-⸻
+```text
+src/                     React UI, styles, demo data, API service
+public/                  Static public assets
+backend/config/          MongoDB connection
+backend/middleware/      Authentication, errors, and rate limiting
+backend/models/          User, conversation, message, transaction
+backend/routes/          Auth, conversations, groups, payments, uploads
+backend/tests/           Node test runner tests
+docs/                    Architecture, API, setup, testing, and B.Tech report
+dist/                    Generated Vite production build
+```
 
-✨ Features
+## Requirements and environment
 
-🔐 Authentication & Profiles
+- Node.js 18+ and npm.
+- MongoDB Atlas or a local MongoDB instance for registration, live API features, and persistence.
 
-* User registration and login.
-* JWT-based authentication.
-* Password hashing with bcrypt.
-* User profile management.
-* Protected routes and authenticated API access.
+From the project root in PowerShell:
 
-💬 Real-Time Messaging
+```powershell
+Copy-Item backend\.env.example backend\.env
+```
 
-* One-to-one conversations.
-* Group conversations.
-* Instant message delivery using Socket.IO.
-* Message replies.
-* Message editing and deletion.
-* Emoji reactions.
-* Read receipts.
-* Typing indicators.
+Edit `backend\.env` locally. Required for authentication and MongoDB-backed API use:
 
-📎 Media & File Sharing
+```dotenv
+PORT=5002
+CLIENT_URL=http://localhost:5174
+COOKIE_SAME_SITE=lax
+MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/chatsphere
+JWT_SECRET=<unique-random-secret-at-least-32-characters>
+JWT_EXPIRES_IN=7d
+UPLOAD_DIR=./uploads
+NODE_ENV=development
+```
 
-* File uploads and sharing.
-* Audio messages and voice notes.
-* Media support within conversations.
+The backend loads `backend\.env` by path regardless of the terminal's current directory; it reads `MONGODB_URI`, not a root Vite variable. The root `.env` is only for frontend build-time settings such as `VITE_API_BASE_URL`. Authentication uses an HttpOnly, Secure cookie; the browser sends it with credentialed API and Socket.IO requests, and the token is not stored in localStorage. `COOKIE_SAME_SITE` defaults to `lax`; use `none` only when the frontend and API are on different sites, and serve both over HTTPS.
 
-👥 Group Management
+Generate a local JWT secret with Node.js, then paste it into the ignored `backend\.env` file (never into source control):
 
-* Create and manage group conversations.
-* Group administrator controls.
-* Add and manage group members.
+```powershell
+node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
+```
 
-🔔 Additional Features
+The frontend defaults to `/api`; Vite proxies API and Socket.IO requests to `http://localhost:5002` during local development, avoiding browser CORS/host mismatches. Vite defaults to port 5173, but if that port is occupied it automatically selects another (this workspace currently uses 5174). Open the exact URL printed by Vite. `CLIENT_URL` is the allowed browser origin for direct API/socket connections; set it to the URL/port Vite actually uses if bypassing the development proxy. To override the API URL (normally for production), copy `.env.example` to `.env` in the project root and set `VITE_API_BASE_URL` to the deployed backend's public `/api` URL. Vite reads frontend environment variables at startup.
 
-* Notifications.
-* Conversation search.
-* Archived chats.
-* Persistent theme preferences.
-* Responsive dark-themed interface.
-* Demo payment flow with simulated receipts.
+### Start locally (two PowerShell terminals)
 
-⚡ Real-Time Infrastructure
+Terminal 1 — backend:
 
-* Persistent message storage with MongoDB.
-* WebSocket communication through Socket.IO.
-* RESTful APIs for application operations.
-* Configurable frontend and backend environments.
+```powershell
+cd C:\path\to\chatApplication\backend
+npm.cmd install
+npm.cmd start
+```
 
-⸻
+Wait for `ChatSphere backend running on http://localhost:5002`. If MongoDB is not configured, the backend will explicitly report degraded mode and registration will remain unavailable.
 
-How It Works
+Terminal 2 — frontend, from the project root:
 
-1. Users register or log in to access the application.
-2. The React frontend communicates with the Express backend through REST APIs.
-3. Socket.IO manages real-time events between connected clients.
-4. The backend authenticates requests and processes messages.
-5. Messages are stored in MongoDB for persistence.
-6. Socket.IO delivers new messages and conversation events to authorized recipients.
-7. Uploaded files are handled by the backend and stored according to the configured storage system.
+```powershell
+cd C:\path\to\chatApplication
+npm.cmd install
+npm.cmd run dev
+```
 
-⸻
+Open the exact local URL printed by Vite (for example, `http://localhost:5174/register`). Health checks are `http://localhost:5002/api/health` and `http://localhost:5002/api/health/database`; through the Vite proxy, `http://localhost:5174/api/health` should return the same health response. With no MongoDB URI or an unreachable database, the server can start in degraded mode. Health reports the database as unavailable and database-dependent API routes return HTTP 503 rather than pretending persistence works.
 
-🛠️ Tech Stack
+### MongoDB Atlas quick setup
 
-Technology	Purpose
-React 18	Frontend user interface
-Vite	Frontend development server and build tool
-React Router	Client-side navigation
-JavaScript	Frontend application logic
-CSS	Styling and responsive layouts
-Node.js	Backend JavaScript runtime
-Express.js	REST API and server-side routing
-MongoDB	Database for application data
-Mongoose	MongoDB object modeling
-Socket.IO	Real-time messaging and events
-JWT	Authentication tokens
-bcryptjs	Password hashing
-Multer	File upload handling
-dotenv	Environment variable management
-CORS	Cross-origin request configuration
-lucide-react	Interface icons
+1. Create an Atlas project and cluster.
+2. Create a database user with a strong unique password; URL-encode special characters in the connection string.
+3. Add only your development IP to Atlas Network Access (avoid `0.0.0.0/0` except in a controlled temporary test).
+4. Copy the Node.js driver connection string into `MONGODB_URI`, replacing the database name with `chatsphere`.
+5. Restart the backend and confirm `/api/health/database` reports `connected`.
 
-⸻
+If the health endpoint works through Vite but registration returns HTTP 503 with “Database is unavailable,” the frontend reached Express successfully; configure/check `backend\.env` and Atlas connectivity. If the UI reports that the backend cannot be reached, confirm the backend terminal says it is listening on port 5002, then restart Vite after changing `vite.config.js` or the root `.env`.
 
-📡 Protocols & Technologies Used
+Never commit `.env`, credentials, JWTs, or user data. See [configuration and startup details](./docs/USER_GUIDE.md).
 
-Protocol / Technology	Purpose
-HTTP / HTTPS	Communication between frontend and backend
-WebSocket	Persistent, bidirectional communication
-Socket.IO	Real-time messaging and event management
-REST	API communication
-TCP/IP	Underlying network communication
-JSON	Data exchange between client and server
-JWT	Token-based authentication
-TLS	Encryption of network traffic when deployed over HTTPS
-
-Important: Socket.IO can use WebSocket or fall back to HTTP long-polling. HTTPS/TLS protection depends on the deployed network configuration.
-
-⸻
-
-📋 Requirements
-
-Software Requirements
-
-* Node.js 18 or later.
-* npm.
-* MongoDB local installation or a MongoDB Atlas database.
-* Git.
-* A modern web browser.
-
-Recommended Development Environment
-
-Component	Recommendation
-Operating System	Windows, macOS, or Linux
-Frontend	React + Vite
-Backend	Node.js + Express
-Database	MongoDB
-Editor	Visual Studio Code
-API Testing	Postman or an equivalent HTTP client
-Version Control	Git and GitHub
-
-⸻
-
-🚀 Getting Started
-
-Follow these steps to run ChatSphere locally.
-
-1. Clone the Repository
-
-git clone https://github.com/karthikrdy7/ChatSphere.git
-cd ChatSphere
-
-Replace the repository URL with your actual GitHub repository URL if the repository has a different name.
-
-2. Install Frontend Dependencies
+## Tests and production build
 
 From the project root:
 
-npm install
-
-3. Install Backend Dependencies
-
-cd backend
-npm install
-cd ..
-
-4. Configure Environment Variables
-
-Create a .env file in the backend directory if your backend loads its environment variables from there.
-
-Example:
-
-PORT=5002
-MONGODB_URI=mongodb://127.0.0.1:27017/chatsphere
-JWT_SECRET=replace_with_a_long_random_secret
-CLIENT_URL=http://localhost:5173
-
-Update the values to match your application’s configuration.
-
-If you use MongoDB Atlas, replace the local MongoDB URI with your Atlas connection string.
-
-Security: Never commit real credentials, database passwords, or production secrets to GitHub. Use .env.example to document required variables without exposing sensitive values.
-
-5. Start the Backend
-
-Open a terminal:
-
-cd backend
-npm start
-
-If your backend does not define a start script, use:
-
-node server.js
-
-The backend should start on the port configured in your environment variables.
-
-For example:
-
-http://localhost:5002
-
-The actual API base URL depends on your backend configuration.
-
-6. Start the Frontend
-
-Open a second terminal in the project root:
-
-npm run dev
-
-Open the Vite development URL:
-
-http://localhost:5173
-
-Register an account or log in to start using ChatSphere.
-
-⸻
-
-⚙️ Environment Configuration
-
-A typical project configuration may look like this:
-
-Backend Environment
-
-PORT=5002
-MONGODB_URI=your_mongodb_connection_string
-JWT_SECRET=your_secure_random_secret
-CLIENT_URL=http://localhost:5173
-
-Frontend Environment
-
-If your frontend uses environment variables for API configuration, a Vite variable might look like:
-
-VITE_API_URL=http://localhost:5002
-
-Only configure variables that your application actually uses.
-
-Important: Vite exposes variables prefixed with VITE_ to browser-side code. Never place passwords, private keys, or server secrets in frontend environment variables.
-
-⸻
-
-📁 Project Structure
-
-Chat Application/
-├── backend/
-│   ├── config/
-│   │   └── database.js
-│   ├── middleware/
-│   │   ├── auth.js
-│   │   └── validation.js
-│   ├── models/
-│   │   ├── User.js
-│   │   ├── Message.js
-│   │   └── Conversation.js
-│   ├── routes/
-│   │   ├── auth.js
-│   │   ├── users.js
-│   │   ├── conversations.js
-│   │   ├── messages.js
-│   │   └── uploads.js
-│   ├── tests/
-│   ├── uploads/
-│   ├── utils/
-│   ├── server.js
-│   └── package.json
-├── src/
-│   ├── assets/
-│   ├── components/
-│   ├── pages/
-│   ├── services/
-│   ├── data/
-│   ├── App.jsx
-│   ├── main.jsx
-│   └── styles.css
-├── public/
-├── docs/
-│   └── screenshots/
-├── .env.example
-├── .gitignore
-├── index.html
-├── package.json
-└── README.md
-
-This is a representative structure. Keep only the files and directories that actually exist in your repository, and update the names to match your implementation.
-
-⸻
-
-🔌 API Overview
-
-The following table illustrates the typical endpoints for a chat application. Confirm the actual routes in your backend before publishing this section as API documentation.
-
-Module	Method	Endpoint	Purpose
-Authentication	POST	/api/auth/register	Register a user
-Authentication	POST	/api/auth/login	Authenticate a user
-Users	GET	/api/users	Retrieve users
-Users	PUT	/api/users/profile	Update a profile
-Conversations	GET	/api/conversations	Retrieve conversations
-Conversations	POST	/api/conversations	Create a conversation
-Messages	GET	/api/messages/:conversationId	Retrieve messages
-Messages	POST	/api/messages	Create a message
-Uploads	POST	/api/upload	Upload a file
-Payments	POST	/api/payments	Execute the demo payment flow
-
-Socket.IO Events
-
-Depending on the implementation, real-time events may include:
-
-* Joining a conversation room.
-* Sending and receiving messages.
-* Typing indicators.
-* Message reactions.
-* Read receipts.
-* User connection and disconnection.
-* Group conversation updates.
-
-⸻
-
-🧪 Testing
-
-Run the backend test suite if it is configured:
-
-cd backend
-npm test
-
-If automated tests are not yet implemented, test the following scenarios manually.
-
-Authentication
-
-* Register a new user.
-* Log in with valid credentials.
-* Verify that invalid credentials are rejected.
-* Confirm that protected routes require authentication.
-
-Messaging
-
-* Send a message between two accounts.
-* Confirm that the recipient receives it in real time.
-* Reload the application and verify message persistence.
-* Test message replies, edits, and deletion.
-
-Group Conversations
-
-* Create a group.
-* Add participants.
-* Test administrator and member permissions.
-
-Media & Connectivity
-
-* Upload and download permitted files.
-* Test voice notes.
-* Verify that unauthorized users cannot access private conversations.
-* Test behavior when the database or network becomes unavailable.
-
-⸻
-
-🔐 Security
-
-ChatSphere uses several technologies intended to protect user accounts and application data.
-
-Security Features
-
-* JWT-based authentication.
-* Password hashing with bcrypt.
-* Authenticated backend routes.
-* Environment-based configuration.
-* Configurable CORS policies.
-* Server-side request validation.
-
-Recommended Production Improvements
-
-* Use secure, httpOnly cookies where appropriate for authentication.
-* Enforce authorization on every private conversation and message operation.
-* Validate file types, file sizes, and upload permissions.
-* Apply rate limiting to authentication and sensitive endpoints.
-* Serve production traffic exclusively over HTTPS.
-* Store uploaded files in controlled storage with appropriate access restrictions.
-* Avoid logging passwords, tokens, and sensitive message content.
-* Add automated tests for authentication and authorization.
-
-Privacy note: Authentication and HTTPS do not provide end-to-end encryption. Unless a separate end-to-end encryption system is implemented, the server may be able to access stored message content.
-
-⸻
-
-🌟 Advantages
-
-* Real-time communication.
-* Modern and responsive interface.
-* Direct and group messaging.
-* Persistent conversations.
-* File and voice-message sharing.
-* Modular full-stack architecture.
-* Cross-platform browser access.
-* Customizable user experience.
-* Practical implementation of networking and database concepts.
-* Suitable for demonstrating full-stack development skills.
-
-⸻
-
-⚠️ Known Limitations
-
-Depending on the current implementation:
-
-* MongoDB availability is required for persistent database-backed functionality.
-* Local file storage is not suitable for many production deployments.
-* In-memory rate limiting does not scale reliably across multiple server instances.
-* Browser token storage requires careful security consideration.
-* Real-time communication needs proper reconnection and error handling.
-* Multiple-account behavior must be tested using separate sessions.
-* The demo payment flow does not represent a real payment gateway.
-* Production deployment requires environment-specific configuration.
-* End-to-end encryption is not included unless separately implemented.
-
-⸻
-
-🔮 Future Improvements
-
-* Secure cookie-based authentication.
-* Online status and last-seen information.
-* Message pagination and search highlighting.
-* Cloud storage integration.
-* Push notifications.
-* Improved mobile responsiveness.
-* Message delivery status.
-* End-to-end encryption.
-* Redis-based distributed rate limiting.
-* Docker deployment.
-* Continuous integration and automated testing.
-* Progressive Web App support.
-* Accessibility improvements.
-* Production payment gateway integration.
-* Monitoring, logging, and performance optimization.
-
-⸻
-
-🤝 Contributing
-
-Contributions and suggestions are welcome!
-
-1. Fork the repository.
-2. Create a feature branch.
-3. Implement your changes.
-4. Test your changes locally.
-5. Commit your work.
-6. Push the branch to your fork.
-7. Open a Pull Request.
-
-Please do not commit environment files containing secrets, private keys, user uploads, or other sensitive data.
-
-⸻
-
-📄 License
-
-This project is intended to use the MIT License.
-
-Add a LICENSE file containing the full MIT License text before distributing the project under this license.
-
-⸻
-
-👨‍💻 Author
-
-B. Karthik Reddy
-
-GitHub: https://github.com/karthikrdy7
-
-⸻
-
-⭐ If you like ChatSphere, consider giving the repository a star!
-
-Chat. Connect. Communicate. — All in one place.
+```powershell
+npm.cmd run build
+```
+
+From `backend\`:
+
+```powershell
+npm.cmd test
+```
+
+The backend tests cover password hashing/validation, token configuration, authentication middleware error handling, access checks, and rate limiting. A passing build/test suite does not substitute for live MongoDB, two-account Socket.IO, group, or attachment integration tests.
+
+## Security and deployment limits
+
+- JWTs are issued in Secure, HttpOnly, SameSite cookies and are not readable by frontend JavaScript. The browser includes the cookie in API and Socket.IO requests; use HTTPS in production.
+- Helmet sets security-focused HTTP headers, and CORS permits only the exact origin configured by `CLIENT_URL`.
+- Login and registration validate input types, email format, name length, and password size before processing credentials.
+- Set optional `REDIS_URL` to share rate limits across backend instances. If Redis is not configured or becomes unavailable, the server warns and falls back to per-process memory limits.
+- Local disk uploads need private, durable object storage and malware scanning before production. Requests accept signature-verified images, PDFs, and audio up to 5 MB with random stored names; do not treat format validation as malware scanning.
+- Configure HTTPS, strong secrets, exact frontend CORS origin, MongoDB least-privilege access, persistent private upload storage, logs/monitoring, backups, and production-grade rate limiting before deployment.
+- Logout clears the browser's authentication cookie. JWTs are stateless and are not revoked server-side, so copied tokens remain valid until expiry.
+- OAuth, email password reset, calling providers, and real payments are not configured. Demo transaction verification is backend-controlled but simulated and does not prove a real transfer.
+
+### Deploy frontend and backend separately
+
+1. Deploy the Node backend as a persistent service with the backend environment variables above. Set `CLIENT_URL` to the deployed frontend's exact HTTPS origin, use a strong secret, and configure Atlas network access for the backend host's egress IP. Do not expose `MONGODB_URI` or `JWT_SECRET` as frontend build variables.
+2. Configure private persistent attachment storage and HTTPS before enabling uploads in production. The current local-disk storage is not suitable for ephemeral server instances.
+3. Build the frontend with `VITE_API_BASE_URL=https://<your-backend-host>/api` in the frontend hosting provider's build environment, then run the normal Vite production build. This value is public API configuration, not a secret. Rebuild after changing it.
+4. Ensure the backend host/proxy supports WebSocket upgrades for Socket.IO and verify the deployment platform's load-balancing behavior; multi-instance deployments need a compatible Socket.IO adapter and shared rate limiting.
+5. Verify `/api/health` and `/api/health/database` after deployment, then perform a two-account registration/chat smoke test.
+
+## Documentation
+
+- [Feature implementation checklist](./BACKEND_IMPLEMENTATION_CHECKLIST.md)
+- [API endpoints and Socket.IO events](./docs/API_DOCUMENTATION.md)
+- [MongoDB collections and indexes](./docs/DATABASE_DESIGN.md)
+- [Architecture](./docs/SYSTEM_ARCHITECTURE.md)
+- [Local user guide and troubleshooting](./docs/USER_GUIDE.md)
+- [Testing and verification limits](./docs/TESTING.md)
+- [B.Tech project report](./docs/PROJECT_DOCUMENTATION.md)
