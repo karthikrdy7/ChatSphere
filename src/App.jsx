@@ -420,7 +420,7 @@ function LandingPage() {
           </p>
           <div className="hero-actions">
             <Link className="primary-btn" to="/register">Create account</Link>
-            <Link className="secondary-btn" to="/login">Open dashboard</Link>
+            <Link className="secondary-btn" to="/login">Open Chats</Link>
           </div>
           <ul className="feature-list">
             {featureList.map((feature) => (
@@ -1998,7 +1998,7 @@ function ContactsPage({ contacts, chats, setChats, liveMode }) {
             <small className="eyebrow">People</small>
             <h2>Contacts</h2>
           </div>
-          <Link className="text-link" to="/dashboard">Return to dashboard</Link>
+          <Link className="text-link" to="/dashboard">Return to Chats</Link>
         </div>
 
         {error && <div className="error-message" role="alert">{error}</div>}
@@ -2037,7 +2037,7 @@ function ArchivedChatsPage({ chats }) {
             <small className="eyebrow">Inbox</small>
             <h2>Archived chats</h2>
           </div>
-          <Link className="text-link" to="/dashboard">Back to chats</Link>
+          <Link className="text-link" to="/Open Chats">Back to chats</Link>
         </div>
 
         {archived.length ? (
@@ -2509,7 +2509,7 @@ function NotFoundPage() {
         <small className="eyebrow">404</small>
         <h2>Page not found</h2>
         <p>The page you are looking for does not exist in this demo app.</p>
-        <Link className="primary-btn" to="/dashboard">Go to dashboard</Link>
+        <Link className="primary-btn" to="/OpenChats">Go to OpenChats</Link>
       </div>
     </div>
   );
